@@ -1,8 +1,22 @@
-<p align="center">
+<div align="center">
   <strong>φ</strong>
-</p>
+  <h1>Nexus Trade Pro</h1>
+  <p><em>AI-powered trading bot for Brazilian stock market (B3)</em></p>
+  <p>
+    <a href="https://github.com/elidadutra187/nexus-trade-pro">Repository</a> ·
+    <a href="https://github.com/elidadutra187">GitHub Profile</a>
+  </p>
+</div>
 
-# Nexus Trade Pro
+
+## Positioning
+
+This repository is part of the `φ` portfolio by [Élida Dutra](https://github.com/elidadutra187), focused on practical systems for e-commerce, automation, analytics, content generation and growth operations.
+
+**Repository:** [elidadutra187/nexus-trade-pro](https://github.com/elidadutra187/nexus-trade-pro)  
+**GitHub:** [https://github.com/elidadutra187](https://github.com/elidadutra187)  
+**Purpose:** AI-powered trading bot for Brazilian stock market (B3)
+
 
 > Bloomberg-style AI trading dashboard for the Brazilian stock market (B3)
 
@@ -172,3 +186,10 @@ MIT
   <strong>φ</strong><br>
   <em>Building intelligent systems at the intersection of marketing, data, and AI</em>
 </p>
+
+<div align="center">
+  <strong>φ</strong>
+  <br />
+  <sub>Built and maintained by <a href="https://github.com/elidadutra187">Élida Dutra</a>.</sub>
+</div>
+
