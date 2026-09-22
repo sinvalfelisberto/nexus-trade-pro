@@ -21,12 +21,12 @@ import httpx
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
-from dotenv import load_dotenv
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core"))
+import env_config as cfg  # configuracao sempre do .env da raiz
 
-load_dotenv()
-
-API_URL = "http://localhost:8000"
-BRAPI_TOKEN = os.getenv("BRAPI_TOKEN", "")
+API_URL = cfg.server_url()
+BRAPI_TOKEN = cfg.get_str("BRAPI_TOKEN", "")
 
 # ══════════════════════════════════════════════════════════════
 # CONFIGURACAO AVANCADA

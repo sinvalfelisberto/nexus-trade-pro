@@ -35,15 +35,18 @@
 
 ## Como Iniciar
 
+Passo a passo completo (venv, `.env`, historico da B3, verificacao): [README](../README.md#getting-started-step-by-step).
+
 ### 1. Iniciar o Servidor
 ```bash
-cd D:\Users\elida\Desktop\NexusTrade
-python server_fastmcp.py
+# na raiz do projeto, com o venv ativo
+python3 core/server_fastmcp.py http
 ```
-O servidor inicia na porta 8000.
+O servidor inicia na porta `SERVER_PORT` do `.env` (padrao 8000). Sem o argumento `http` ele sobe
+em modo MCP (stdio) e o dashboard fica "offline".
 
 ### 2. Abrir a Dashboard
-Abra o arquivo `nexus_trade_pro.html` no navegador (Chrome recomendado).
+Acesse <http://localhost:8000/dashboard> (o proprio servidor entrega a pagina).
 
 ### 3. Ativar o Bot
 1. Va para aba **BOT PRO**
@@ -96,8 +99,8 @@ Abra o arquivo `nexus_trade_pro.html` no navegador (Chrome recomendado).
 **Descoberta principal**: Stochastic e ADX sao os indicadores que funcionam. RSI e Bollinger Bands foram ELIMINADOS por baixa performance.
 
 ### Executar Treinamento Avancado
-1. Certifique-se que o servidor esta rodando: `python server_fastmcp.py http`
-2. Execute: `treinar_bot.bat` (Windows) ou `python train_bot_advanced.py`
+1. Certifique-se que o servidor esta rodando: `python3 core/server_fastmcp.py http`
+2. Execute: `scripts\treinar_bot.bat` (Windows) ou `python3 training/train_bot_advanced.py`
 3. Aguarde o treinamento (3-5 minutos)
 4. Reinicie o servidor para aplicar novos pesos
 
@@ -134,6 +137,11 @@ Abra o arquivo `nexus_trade_pro.html` no navegador (Chrome recomendado).
 
 ## Parametros Recomendados
 
+> Stop Loss, Take Profit e Max por ordem vem do `.env` (`STOP_LOSS_PERCENT`, `TAKE_PROFIT_PERCENT`,
+> `MAX_ORDER_VALUE`) e ficam bloqueados na aba BOT PRO (marca `.env`). Para usar um dos perfis
+> abaixo, altere esses valores no `.env` e reinicie o servidor. O padrao atual do `.env.example`
+> e 4% / 8% / R$ 300, com 3 posicoes simultaneas (`MAX_POSITIONS`).
+
 ### Perfil Conservador
 - Confianca minima: 70%
 - Stop Loss: 2%
@@ -154,38 +162,41 @@ Abra o arquivo `nexus_trade_pro.html` no navegador (Chrome recomendado).
 
 ---
 
-## APIs Utilizadas
+## APIs e Fontes de Dados
 
-| API | Funcao | Status | Limite |
-|-----|--------|--------|--------|
-| brapi.dev | Cotacoes B3 em tempo real | LIMITE ATINGIDO | 15.000 req/mes |
-| Tavily AI | Noticias e sentimento | Ativo | 1.000 req/mes |
+| Fonte | Funcao | Limite (plano gratuito) |
+|-----|--------|--------|
+| brapi.dev | Cotacoes atuais | 15.000 req/mes, 1 ativo e 1 requisicao por vez, historico de 3 meses, ~30 min de atraso |
+| B3 - Series Historicas (COTAHIST) | Historico diario oficial dos graficos (MySQL) | Sem limite, sem token - ver [HISTORICO_B3.md](HISTORICO_B3.md) |
+| Yahoo Finance | Provedor alternativo dos modulos de analise | Nao oficial, sem token |
+| Tavily AI | Noticias e sentimento | 1.000 req/mes |
 
-### Sistema de Fallback (NOVO)
-Quando a API brapi.dev atinge o limite mensal, o sistema automaticamente usa **dados simulados realistas** para que voce possa continuar treinando o bot. Os dados simulados:
-- Sao baseados em precos reais historicos
+Sem token, a brapi so libera PETR4, VALE3, ITUB4 e MGLU3 - teste o token com outro ativo (ex.: PETR3).
+
+### Sistema de Fallback
+Quando a brapi nao retorna a cotacao de um ativo (token invalido, cota esgotada, ativo inexistente),
+**so esse ativo** usa dados simulados; os demais continuam com dados reais:
+- Sao baseados em precos de referencia fixos
 - Tem variacao aleatoria de +/- 1% por ciclo
-- Mostram tag **[SIM]** em amarelo (vs **[LIVE]** verde para dados reais)
+- Mostram tag **SIM** em amarelo (vs **LIVE** verde para dados reais)
 
 ### Como Renovar Token brapi.dev
 1. Acesse: https://brapi.dev/dashboard
 2. Clique em "Regenerar Token"
-3. Atualize o arquivo `.env` com o novo token
+3. Atualize o `BRAPI_TOKEN` no `.env` - o servidor rele o token sozinho, sem reiniciar
 
-### Tokens (arquivo .env)
+### Configuracao (arquivo .env)
+Todas as configuracoes vem do `.env` (modelo comentado em `.env.example`), que tem prioridade sobre
+variaveis do sistema. Principais chaves:
 ```env
 BRAPI_TOKEN=seu_token_brapi
 TAVILY_KEY=sua_chave_tavily
-WHATSAPP_NUMBER=+5511999999999
+DB_OLD_HOST=...            # MySQL do historico da B3 (opcional)
+SERVER_PORT=8000
+INITIAL_CAPITAL=500
 ```
 
-**IMPORTANTE:** Os tokens atuais atingiram os limites mensais:
-- **brapi.dev:** 15.000 requisicoes/mes - LIMITE ATINGIDO
-- **Tavily:** 1.000 requisicoes/mes - LIMITE ATINGIDO
-
-Renove no inicio do proximo mes ou faca upgrade para planos pagos.
-
-### Fallback de Noticias (NOVO)
+### Fallback de Noticias
 Quando a API Tavily esta offline, o sistema mostra **noticias de exemplo** para demonstracao:
 - Tag **[SIMULADO]** aparece no card de sentimento
 - Tag **[EXEMPLO]** aparece em cada noticia
@@ -196,13 +207,19 @@ Quando a API Tavily esta offline, o sistema mostra **noticias de exemplo** para 
 ## Estrutura de Arquivos
 
 ```
-NexusTrade/
-├── nexus_trade_pro.html    # Dashboard v3.0 com IA
-├── server_fastmcp.py       # Servidor FastMCP (16 tools)
-├── .env                    # Tokens de API
-├── requirements.txt        # Dependencias Python
-└── CLAUDE_CODE_BRIEFING.md # Este arquivo
+nexus-trade-pro/
+├── core/                    # servidor, config (.env), historico B3, analise, risco, auto trader
+├── dashboard/nexus_trade_pro.html
+├── training/                # treinamentos e teste de conexao com a corretora
+├── scripts/                 # atalhos .bat e atualizar_cotacoes.sh/.bat
+├── sql/bolsa_schema.sql     # tabelas do historico da B3
+├── docs/                    # este arquivo, guias e pendencias
+├── data/                    # estado em tempo de execucao (nao versionado)
+├── .env.example             # modelo de configuracao
+└── requirements.txt
 ```
+
+Detalhes de cada arquivo: secao *Project Structure* do [README](../README.md#project-structure).
 
 ---
 
@@ -212,11 +229,16 @@ NexusTrade/
 |-------|----------|
 | `ntp_portfolio_v3` | Saldo (R$500), posicoes, trades |
 | `ntp_learning` | Dados de aprendizado da IA |
-| `ntp_botConfig` | Configuracoes do bot |
+| `ntp_botConfig` | Configuracoes do bot (stop, alvo e max por ordem sempre vem do `.env`) |
+| `ntp_favorites` | Ativos favoritos (estrela nos cards; aparecem primeiro no grafico) |
 
 ---
 
-## Ativos Monitorados (70+ ativos)
+## Ativos Monitorados (90 ativos)
+
+> **Atencao:** 15 codigos desta lista nao existem mais na B3 (fusoes, troca de codigo ou saida da
+> bolsa) - ver item 6 de [MELHORIAS_URGENTES.md](MELHORIAS_URGENTES.md). Qualquer outro ativo pode
+> ser buscado pelo campo de busca da aba MERCADO.
 
 ### Blue Chips (10)
 PETR4, VALE3, ITUB4, BBDC4, BBAS3, WEGE3, ABEV3, B3SA3, RENT3, SUZB3
@@ -251,12 +273,18 @@ HGLG11, MXRF11, KNCR11, XPML11, VISC11, BTLG11, VGIR11, RECR11, CPTS11, IRDM11
 
 ### Servidor nao inicia
 ```bash
-pip install fastmcp httpx python-dotenv fastapi uvicorn
+source venv/bin/activate      # Windows: venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-### Cotacoes nao carregam
-- Verifique se o servidor esta rodando na porta 8000
-- Confira o token da brapi.dev no arquivo .env
+### Cotacoes nao carregam ou aparecem como SIM
+- Verifique se o servidor esta rodando (`python3 core/server_fastmcp.py http`)
+- Teste o token: <http://localhost:8000/api/quote/PETR3> deve trazer um preco
+- Mais casos: secao *Troubleshooting* do [README](../README.md#troubleshooting)
+
+### Grafico sem historico longo
+- Sem o historico da B3 no MySQL, os graficos usam a brapi (3 meses no plano gratuito)
+- Carregue com `python3 core/b3_history.py --carga` - ver [HISTORICO_B3.md](HISTORICO_B3.md)
 
 ### Bot nao opera
 - Verifique se ha saldo disponivel (minimo R$ 50)
@@ -358,7 +386,21 @@ else:
 
 ## Changelog
 
-### v3.4 (Atual - 30/04/2026)
+### v3.6 (22/09/2026)
+- **Historico oficial da B3** (arquivos COTAHIST) em MySQL: 5 anos, ~1,45 mi de linhas, tabelas `bolsa_*`
+  - `core/b3_history.py` (carga, atualizacao, verificacao) - reutilizavel em outros projetos
+  - `scripts/atualizar_cotacoes.sh/.bat`: procura e preenche pregoes faltando ou incompletos, registra feriados
+  - Servidor atualiza sozinho ao subir e a cada `B3_UPDATE_HOURS` horas
+- **Graficos**: candles corrigidos (Chart.js 4 + plugin financeiro 0.2), velas diarias/semanais/mensais/anuais,
+  painel de valores e tooltips em R$, selecao do ativo por lista com favoritos primeiro, fonte dos dados exibida
+- **Aba MERCADO**: favoritos (estrela), campo de busca por ticker/setor, busca de ativos fora da lista,
+  grade so usa simulado para o ativo sem cotacao real
+- **Configuracao centralizada no `.env`** (`core/env_config.py`): prioridade sobre o sistema, token relido
+  sem reiniciar, porta/host configuraveis, endpoint `/api/config` para o dashboard
+- **Correcoes**: formato de moeda pt-BR, cache que servia cotacao de dias anteriores, sincronizacao com o
+  auto trader, analise exibindo R$ 0,00 em erro, requisicoes simultaneas recusadas pela brapi
+
+### v3.4 (30/04/2026)
 - **RISK MANAGER v1.0** - Sistema completo de controle de risco
   - Controle de drawdown maximo (20%)
   - Limite de perda diaria (5%)
@@ -422,5 +464,5 @@ else:
 
 ---
 
-*Sistema: Nexus Trade Pro v3.0*
-*Desenvolvido com: FastMCP + brapi.dev + Tavily AI + Machine Learning*
+*Sistema: Nexus Trade Pro v3.6*
+*Desenvolvido com: FastMCP + brapi.dev + B3 (COTAHIST) + Tavily AI + Machine Learning*

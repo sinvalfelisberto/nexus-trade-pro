@@ -12,23 +12,31 @@ Recursos:
 """
 import os
 import json
+import asyncio
 import math
 import random
 import re
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
+import sys
 
-# Carregar .env da raiz do projeto
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+# Configuracao vem sempre do .env da raiz (recarregado automaticamente quando muda)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import env_config as cfg
 
 import httpx
 from fastmcp import FastMCP
 
 mcp = FastMCP("NexusTradePro")
 
-BRAPI_TOKEN = os.getenv("BRAPI_TOKEN", "")
-TAVILY_KEY = os.getenv("TAVILY_KEY", "")
-WHATSAPP_NUMBER = os.getenv("WHATSAPP_NUMBER", "+5511999999999")
+
+def brapi_token() -> str:
+    return cfg.get_str("BRAPI_TOKEN")
+
+def tavily_key() -> str:
+    return cfg.get_str("TAVILY_KEY")
+
+def whatsapp_number() -> str:
+    return cfg.get_str("WHATSAPP_NUMBER")
 
 # ══════════════════════════════════════════════════════════════
 # MODULOS AVANCADOS
@@ -95,7 +103,7 @@ _cache = {}
 def get_cache(key, ttl=60):
     if key in _cache:
         ts, val = _cache[key]
-        if (datetime.now() - ts).seconds < ttl:
+        if (datetime.now() - ts).total_seconds() < ttl:
             return val
     return None
 
@@ -133,32 +141,33 @@ async def get_quote(ticker: str) -> dict:
     cache_key = f"quote_{ticker.upper()}"
     cached = get_cache(cache_key, ttl=90)  # Cache de 90 segundos
     if cached:
-        cached["from_cache"] = True
-        return cached
+        return {**cached, "from_cache": True}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(
                 f"https://brapi.dev/api/quote/{ticker}",
-                params={"token": BRAPI_TOKEN}
+                params={"token": brapi_token()}
             )
             data = r.json()
             if "results" in data and data["results"]:
                 result = data["results"][0]
                 quote = {
                     "ticker": ticker.upper(),
-                    "price": result.get("regularMarketPrice", 0),
-                    "change": result.get("regularMarketChange", 0),
-                    "changePercent": result.get("regularMarketChangePercent", 0),
-                    "volume": result.get("regularMarketVolume", 0),
-                    "previousClose": result.get("regularMarketPreviousClose", 0),
-                    "high": result.get("regularMarketDayHigh", 0),
-                    "low": result.get("regularMarketDayLow", 0),
+                    "price": result.get("regularMarketPrice") or 0,
+                    "change": result.get("regularMarketChange") or 0,
+                    "changePercent": result.get("regularMarketChangePercent") or 0,
+                    "volume": result.get("regularMarketVolume") or 0,
+                    "previousClose": result.get("regularMarketPreviousClose") or 0,
+                    "high": result.get("regularMarketDayHigh") or 0,
+                    "low": result.get("regularMarketDayLow") or 0,
+                    "open": result.get("regularMarketOpen") or 0,
+                    "marketTime": result.get("regularMarketTime"),
                     "source": "REAL",
                     "timestamp": datetime.now().isoformat()
                 }
                 set_cache(cache_key, quote)
                 return quote
-            return {"error": "Ticker nao encontrado", "ticker": ticker}
+            return {"error": data.get("message") or "Ticker nao encontrado", "ticker": ticker}
     except Exception as e:
         return {"error": str(e), "ticker": ticker, "source": "ERROR"}
 
@@ -169,10 +178,16 @@ async def get_quote(ticker: str) -> dict:
 @mcp.tool()
 async def get_quotes_batch(tickers: str) -> dict:
     """Busca cotações de múltiplos ativos (separados por vírgula)"""
-    ticker_list = [t.strip().upper() for t in tickers.split(",")]
-    results = {}
-    for t in ticker_list:
-        results[t] = await get_quote(t)
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    # A brapi recusa requisicoes simultaneas acima do limite do plano
+    sem = asyncio.Semaphore(max(1, cfg.get_int("BRAPI_MAX_CONCURRENT", 1)))
+
+    async def fetch(t):
+        async with sem:
+            return await get_quote(t)
+
+    quotes = await asyncio.gather(*(fetch(t) for t in ticker_list))
+    results = dict(zip(ticker_list, quotes))
     return {"quotes": results, "count": len(results)}
 
 
@@ -206,7 +221,7 @@ async def get_history(ticker: str, days: int = 30) -> dict:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
                 f"https://brapi.dev/api/quote/{ticker}",
-                params={"token": BRAPI_TOKEN, "range": range_param, "interval": "1d"}
+                params={"token": brapi_token(), "range": range_param, "interval": "1d"}
             )
             data = r.json()
             if "results" in data and data["results"]:
@@ -218,6 +233,141 @@ async def get_history(ticker: str, days: int = 30) -> dict:
             return {"error": "Sem dados historicos", "ticker": ticker}
     except Exception as e:
         return {"error": str(e), "ticker": ticker}
+
+
+# Historico oficial da B3 no MySQL do .env (opcional; sem banco, usa a brapi)
+try:
+    import b3_history
+    B3_HISTORY_AVAILABLE = True
+except ImportError as e:
+    B3_HISTORY_AVAILABLE = False
+    print(f"[X] Historico B3 nao disponivel: {e}")
+
+CHART_RANGES = {"1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"}
+RANGE_DAYS = {"1mo": 30, "3mo": 90, "6mo": 182, "1y": 365, "2y": 730, "5y": 1827, "10y": 3653}
+CHART_INTERVALS = {"1d", "1wk", "1mo", "1y"}  # "1y" e agregado a partir de "1mo"
+
+
+def aggregate_yearly(candles: list) -> list:
+    """Agrupa velas mensais em anuais (OHLC + volume somado)"""
+    years = {}
+    for c in candles:
+        if c.get("close") is None:
+            continue
+        year = datetime.fromtimestamp(c["date"]).year
+        y = years.get(year)
+        if y is None:
+            years[year] = {"date": c["date"], "open": c.get("open"), "high": c.get("high"),
+                           "low": c.get("low"), "close": c["close"], "volume": c.get("volume") or 0}
+        else:
+            y["high"] = max(y["high"], c.get("high") or y["high"])
+            y["low"] = min(y["low"], c.get("low") or y["low"])
+            y["close"] = c["close"]
+            y["volume"] += c.get("volume") or 0
+    return [years[k] for k in sorted(years)]
+
+
+def use_b3_history() -> bool:
+    return B3_HISTORY_AVAILABLE and b3_history.is_configured()
+
+
+async def today_candle(ticker: str):
+    """Vela do pregao de hoje a partir da cotacao da brapi (a B3 so publica o arquivo a noite)"""
+    quote = await get_quote(ticker)
+    if quote.get("error") or not quote.get("price"):
+        return None
+    try:
+        market_day = datetime.fromisoformat(str(quote.get("marketTime")).replace("Z", "+00:00")).astimezone().date()
+    except ValueError:
+        return None
+    if market_day != datetime.now().date():
+        return None  # antes da abertura a brapi ainda devolve o pregao anterior
+    price = quote["price"]
+    return {"date": int(datetime.combine(market_day, datetime.min.time()).timestamp()),
+            "open": quote.get("open") or price, "high": quote.get("high") or price,
+            "low": quote.get("low") or price, "close": price, "volume": quote.get("volume") or 0}
+
+
+async def chart_from_b3(ticker: str, range: str, interval: str, days: int):
+    """Historico do banco (B3) + vela de hoje da brapi. Retorna None se o ativo nao estiver no banco."""
+    today = datetime.now().date()
+    if days > 0:
+        since = today - timedelta(days=days)
+    elif range == "ytd":
+        since = today.replace(month=1, day=1)
+    elif range in RANGE_DAYS:
+        since = today - timedelta(days=RANGE_DAYS[range])
+    else:
+        since = None
+
+    cache_key = f"b3_{ticker}_{since}"
+    candles = get_cache(cache_key, ttl=300)
+    if candles is None:
+        candles = await asyncio.to_thread(b3_history.get_daily, ticker, since)
+        if not candles:
+            return None
+        set_cache(cache_key, candles)
+
+    source = "B3"
+    if datetime.fromtimestamp(candles[-1]["date"]).date() < today:
+        live = await today_candle(ticker)
+        if live:
+            candles = candles + [live]
+            source = "B3 + brapi (hoje)"
+
+    return {"ticker": ticker, "range": range, "interval": interval,
+            "data": b3_history.aggregate(candles, interval), "source": source}
+
+
+@mcp.tool()
+async def get_chart_history(ticker: str, range: str = "1y", interval: str = "1d", days: int = 0) -> dict:
+    """Historico para graficos: velas diarias, semanais, mensais ou anuais.
+    range: 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max | interval: 1d, 1wk, 1mo, 1y
+    days > 0 limita as velas aos ultimos N dias corridos.
+    Fonte: banco com o historico oficial da B3 (se configurado no .env); senao, brapi."""
+    if range not in CHART_RANGES or interval not in CHART_INTERVALS:
+        return {"error": f"Parametros invalidos (range: {sorted(CHART_RANGES)}, interval: {sorted(CHART_INTERVALS)})", "ticker": ticker}
+
+    b3_note = ""
+    if use_b3_history():
+        try:
+            result = await chart_from_b3(ticker, range, interval, days)
+            if result:
+                return result
+            b3_note = f"{ticker} nao esta no historico da B3 (codigo inexistente ou tipo nao importado). brapi: "
+        except Exception as e:
+            print(f"[B3] Erro ao ler historico de {ticker}: {e} - usando brapi")
+            b3_note = "Banco da B3 indisponivel. brapi: "
+
+    api_interval = "1mo" if interval == "1y" else interval
+    cache_key = f"chart_{ticker}_{range}_{api_interval}"
+    ttl = 300 if api_interval == "1d" else 3600
+    candles = get_cache(cache_key, ttl=ttl)
+
+    if candles is None:
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.get(
+                    f"https://brapi.dev/api/quote/{ticker}",
+                    params={"token": brapi_token(), "range": range, "interval": api_interval}
+                )
+                data = r.json()
+        except Exception as e:
+            return {"error": b3_note + str(e), "ticker": ticker}
+        if not data.get("results"):
+            return {"error": b3_note + (data.get("message") or "Sem dados historicos"), "ticker": ticker}
+        candles = [c for c in data["results"][0].get("historicalDataPrice") or [] if c.get("close") is not None]
+        if not candles:
+            return {"error": b3_note + "Sem dados historicos", "ticker": ticker}
+        set_cache(cache_key, candles)
+
+    if interval == "1y":
+        candles = aggregate_yearly(candles)
+    if days > 0:
+        cutoff = (datetime.now() - timedelta(days=days)).timestamp()
+        candles = [c for c in candles if c["date"] >= cutoff]
+
+    return {"ticker": ticker, "range": range, "interval": interval, "data": candles, "source": "brapi"}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -968,13 +1118,13 @@ async def search_news(query: str, max_results: int = 5) -> dict:
         return cached
 
     # Tentar Tavily primeiro (se configurado)
-    if TAVILY_KEY:
+    if tavily_key():
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 r = await client.post(
                     "https://api.tavily.com/search",
                     json={
-                        "api_key": TAVILY_KEY,
+                        "api_key": tavily_key(),
                         "query": f"{query} mercado financeiro Brasil",
                         "max_results": max_results,
                         "search_depth": "basic",
@@ -1179,7 +1329,7 @@ async def send_alert(message: str, ticker: str = "") -> dict:
     """Envia alerta via WhatsApp (placeholder — precisa Twilio/Z-API)"""
     return {
         "status": "QUEUED",
-        "to": WHATSAPP_NUMBER,
+        "to": whatsapp_number(),
         "message": f"NEXUS TRADE: {ticker} — {message}",
         "note": "WhatsApp API não configurada. Mensagem logada.",
         "timestamp": datetime.now().isoformat()
@@ -1236,9 +1386,9 @@ async def server_status() -> dict:
             "ensemble_model": ENSEMBLE_AVAILABLE,
             "risk_manager": RISK_MANAGER_AVAILABLE
         },
-        "brapi_configured": bool(BRAPI_TOKEN),
-        "tavily_configured": bool(TAVILY_KEY),
-        "whatsapp": WHATSAPP_NUMBER,
+        "brapi_configured": bool(brapi_token()),
+        "tavily_configured": bool(tavily_key()),
+        "whatsapp": whatsapp_number(),
         "timestamp": datetime.now().isoformat()
     }
     return status
@@ -1277,6 +1427,29 @@ from fastapi.responses import FileResponse
 app = FastAPI(title="Nexus Trade Pro API v2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+
+def _b3_update_loop():
+    """Importa os pregoes que faltam na subida do servidor e a cada B3_UPDATE_HOURS horas"""
+    import time as _time
+    while True:
+        if use_b3_history():
+            try:
+                conn = b3_history.connect()
+                try:
+                    b3_history.update(conn)
+                finally:
+                    conn.close()
+            except Exception as e:
+                print(f"[B3] Falha na atualizacao automatica: {e}")
+        _time.sleep(max(1, cfg.get_int("B3_UPDATE_HOURS", 6)) * 3600)
+
+
+@app.on_event("startup")
+async def start_b3_updater():
+    import threading
+    if use_b3_history():
+        threading.Thread(target=_b3_update_loop, daemon=True, name="b3-updater").start()
+
 @app.get("/")
 @app.get("/dashboard")
 async def serve_dashboard():
@@ -1290,6 +1463,11 @@ async def serve_dashboard():
 async def api_status():
     return await server_status()
 
+@app.get("/api/config")
+async def api_config():
+    """Configuracoes nao sensiveis do .env para o dashboard"""
+    return cfg.public_settings()
+
 @app.get("/api/quote/{ticker}")
 async def api_quote(ticker: str):
     return await get_quote(ticker.upper())
@@ -1301,6 +1479,10 @@ async def api_quotes(tickers: str = "PETR4,VALE3,ITUB4"):
 @app.get("/api/history/{ticker}")
 async def api_history(ticker: str, days: int = 30):
     return await get_history(ticker.upper(), days)
+
+@app.get("/api/chart/{ticker}")
+async def api_chart(ticker: str, range: str = "1y", interval: str = "1d", days: int = 0):
+    return await get_chart_history(ticker.upper(), range, interval, days)
 
 @app.get("/api/indicators/{ticker}")
 async def api_indicators(ticker: str):
@@ -2115,7 +2297,7 @@ async def api_autotrader_status():
         "trades": [],
         "positions": [],
         "stats": {"total": 0, "wins": 0, "losses": 0, "win_rate": 0, "pnl": 0},
-        "capital": {"initial": 500, "current": 500}
+        "capital": {"initial": cfg.get_float("INITIAL_CAPITAL", 500.0), "current": cfg.get_float("INITIAL_CAPITAL", 500.0)}
     }
 
     if os.path.exists(log_file):
@@ -2129,8 +2311,8 @@ async def api_autotrader_status():
         with open(risk_file, "r", encoding="utf-8") as f:
             risk = json.load(f)
             result["capital"] = {
-                "initial": risk.get("initial_capital", 500),
-                "current": risk.get("current_capital", 500)
+                "initial": risk.get("initial_capital", result["capital"]["initial"]),
+                "current": risk.get("current_capital", result["capital"]["current"])
             }
             result["stats"]["total"] = risk.get("total_trades", 0)
             result["stats"]["wins"] = risk.get("total_wins", 0)
@@ -2145,7 +2327,6 @@ async def api_autotrader_status():
 # STARTUP
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    import sys
     if len(sys.argv) > 1 and sys.argv[1] == "http":
         import uvicorn
         print("=" * 60)
@@ -2158,8 +2339,10 @@ if __name__ == "__main__":
         print(f"    Ensemble Model:  {'[OK]' if ENSEMBLE_AVAILABLE else '[X]'}")
         print(f"    Risk Manager:    {'[OK]' if RISK_MANAGER_AVAILABLE else '[X]'}")
         print("=" * 60)
-        print(f"  brapi.dev: {'[OK]' if BRAPI_TOKEN else '[X]'}")
-        print(f"  Tavily:    {'[OK]' if TAVILY_KEY else '[X]'}")
+        print(f"  Config:    {cfg.ENV_PATH}")
+        print(f"  brapi.dev: {'[OK]' if brapi_token() else '[X]'}")
+        print(f"  Tavily:    {'[OK]' if tavily_key() else '[X]'}")
+        print(f"  Hist. B3:  {'[OK] MySQL ' + cfg.get_str('DB_OLD_HOST') if use_b3_history() else '[X] (usando brapi)'}")
         print("=" * 60)
         if RISK_MANAGER_AVAILABLE:
             status = risk_get_status()
@@ -2167,7 +2350,11 @@ if __name__ == "__main__":
             print(f"  Drawdown:  {status['drawdown']['current']:.1f}%")
             print(f"  Status:    {status['status']}")
             print("=" * 60)
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        host = cfg.get_str("SERVER_HOST", "0.0.0.0")
+        port = cfg.get_int("SERVER_PORT", 8000)
+        print(f"  Dashboard: http://localhost:{port}/dashboard")
+        print("=" * 60)
+        uvicorn.run(app, host=host, port=port)
     else:
         print("Iniciando FastMCP server...")
         mcp.run()

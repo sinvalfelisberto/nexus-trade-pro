@@ -1,49 +1,52 @@
 # NEXUS TRADE PRO - Guia de Inicio Rapido
 
-## Problema Diagnosticado
+Roteiro para sair do zero ate operar com saldo real, com seguranca: **forward test → conta demo → saldo real**.
 
-O bot estava configurado mas **NAO estava executando trades** de verdade. O backtest mostrava 60% win rate, mas o `risk_state.json` tinha 0 trades registrados.
+> **Instalacao e execucao do projeto** (venv, `.env`, servidor, dashboard, historico da B3):
+> siga o passo a passo do [README](../README.md#getting-started-step-by-step). Este guia comeca
+> depois disso, com o servidor rodando e o dashboard aberto em <http://localhost:8000/dashboard>.
 
-## Solucao Implementada
-
-### Arquivos Novos Criados
-
-| Arquivo | Funcao |
-|---------|--------|
-| `auto_trader.py` | Sistema de trading automatico com ciclos de scan/trade |
-| `train_conservative.py` | Treinamento com walk-forward validation (anti-overfitting) |
-| `iniciar_auto_trader.bat` | Atalho para iniciar o bot |
-| `treinar_conservador.bat` | Atalho para treinar com metricas realistas |
-
-### Configuracoes Ajustadas
-
-O `.env` foi atualizado com parametros **mais conservadores**:
-
-```
-RISK_PER_TRADE=1.0%    (era 2.0%)
-STOP_LOSS=4.0%         (era 3.0%)
-TAKE_PROFIT=8.0%       (ratio 1:2)
-MAX_ORDER_VALUE=R$300  (era R$1000)
-MAX_POSITIONS=3        (era 5)
-```
+Todos os comandos abaixo sao executados **na raiz do projeto**, com o ambiente virtual ativo
+(`source venv/bin/activate` no Linux/macOS, `venv\Scripts\activate` no Windows).
 
 ---
 
-## Passo a Passo para Comecar
+## Contexto
 
-### 1. Instalar Dependencias (apenas uma vez)
+O bot chegou a ter backtest com 60% de win rate, mas **nenhum trade real ou simulado registrado**
+(`data/risk_state.json` com 0 trades). Por isso foram criados o auto trader com forward test e o
+treinamento conservador, e o `.env` passou a usar parametros **mais conservadores**:
 
-```bash
-cd D:\Users\elida\Desktop\NexusTrade
-pip install -r requirements.txt
+```
+RISK_PER_TRADE=1.0       (era 2.0%)
+STOP_LOSS_PERCENT=4.0    (era 3.0%)
+TAKE_PROFIT_PERCENT=8.0  (ratio 1:2)
+MAX_ORDER_VALUE=300      (era R$ 1000)
+MAX_POSITIONS=3          (era 5)
 ```
 
-### 2. Retreinar com Modelo Conservador
+Esses valores vem sempre do `.env`: o servidor, o auto trader e o dashboard (campos marcados com
+`.env` na aba BOT PRO) leem de la. Para mudar, edite o `.env` e reinicie o servidor.
 
-Execute o treinamento conservador para obter pesos mais realistas:
+### Arquivos envolvidos
+
+| Arquivo | Funcao |
+|---------|--------|
+| `core/auto_trader.py` | Trading automatico com ciclos de scan/trade (forward test ou live) |
+| `training/train_conservative.py` | Treinamento com walk-forward validation (anti-overfitting) |
+| `training/test_broker_connection.py` | Teste da conexao com o MetaTrader 5 |
+| `scripts/iniciar_auto_trader.bat` | Atalho Windows para o auto trader (menu com as 3 opcoes) |
+| `scripts/treinar_conservador.bat` | Atalho Windows para o treinamento conservador |
+
+---
+
+## Passo a Passo
+
+### 1. Retreinar com o modelo conservador
 
 ```bash
-treinar_conservador.bat
+python3 training/train_conservative.py      # Linux/macOS
+scripts\treinar_conservador.bat             # Windows
 ```
 
 Isso usa:
@@ -51,42 +54,43 @@ Isso usa:
 - Penalizacao de overfitting
 - Modelo simplificado (4 indicadores: Stoch, ADX, MACD, Volume)
 
-### 3. Iniciar Forward Testing (SEMANA 1-2)
+Gera `training_results.json` e `trained_weights.js` na raiz do projeto.
+
+### 2. Iniciar o forward test (semanas 1-2)
 
 ```bash
-iniciar_auto_trader.bat
+python3 core/auto_trader.py                 # Linux/macOS
+scripts\iniciar_auto_trader.bat             # Windows -> opcao 1 (Forward Test)
 ```
-
-Escolha opcao **1** (Forward Test).
 
 O bot vai:
-- Escanear o mercado a cada 60 segundos
+- Escanear o mercado a cada 60 segundos (15 ativos mais liquidos, horario 10:00-16:30 exceto almoco)
 - Gerar sinais de compra/venda
-- Registrar trades **simulados** no `forward_test_log.json`
-- Atualizar o `risk_state.json` com estatisticas
+- Registrar trades **simulados** em `data/forward_test_log.json`
+- Atualizar `data/risk_state.json` com as estatisticas
 
-**Meta**: Acumular 100+ trades simulados e validar win rate > 50%
+Os trades aparecem no dashboard (aba HISTORICO/PORTFOLIO), que sincroniza com o auto trader a cada 10 s.
 
-### 4. Analisar Resultados
+**Meta**: acumular 100+ trades simulados e validar win rate > 50%. Pare com `Ctrl+C`.
 
-Apos alguns dias, verifique:
+### 3. Analisar os resultados
 
 ```bash
-python -c "import json; print(json.load(open('forward_test_log.json'))['stats'])"
+python3 -c "import json; print(json.load(open('data/forward_test_log.json'))['stats'])"
 ```
 
-Criterios para ir pro saldo real:
-- [x] 100+ trades
-- [x] Win rate > 50%
-- [x] Max drawdown < 15%
-- [x] Profit factor > 1.3
+No Windows, `scripts\iniciar_auto_trader.bat` opcao **3** mostra o mesmo resumo.
 
-### 5. Configurar Corretora (SEMANA 3)
+Criterios para ir para o saldo real:
+- [ ] 100+ trades
+- [ ] Win rate > 50%
+- [ ] Max drawdown < 15%
+- [ ] Profit factor > 1.3
 
-Quando estiver pronto, configure o MetaTrader 5:
+### 4. Configurar a corretora (semana 3)
 
-1. Instale o MT5 da sua corretora (Clear, Rico, Modal, etc)
-2. Abra conta demo primeiro
+1. Instale o MetaTrader 5 da sua corretora (Clear, Rico, Modal etc.) - o pacote `MetaTrader5` do Python so existe para Windows
+2. Abra uma **conta demo** primeiro
 3. Preencha no `.env`:
    ```
    MT5_ACCOUNT=seu_login
@@ -95,20 +99,19 @@ Quando estiver pronto, configure o MetaTrader 5:
    ```
 4. Teste a conexao:
    ```bash
-   python test_broker_connection.py
+   python3 training/test_broker_connection.py
    ```
 
-### 6. Iniciar com Saldo Real (SEMANA 4)
+### 5. Iniciar com saldo real (semana 4)
 
-Quando todos os criterios estiverem OK:
+Somente quando todos os criterios do passo 3 estiverem OK e a conta demo validada:
 
 ```bash
-iniciar_auto_trader.bat
+python3 core/auto_trader.py --live          # pede confirmacao antes de operar
+scripts\iniciar_auto_trader.bat             # Windows -> opcao 2 (Live)
 ```
 
-Escolha opcao **2** (Live).
-
-**Comece com R$500-1000 apenas!**
+**Comece com R$ 500-1000 apenas!**
 
 ---
 
@@ -116,11 +119,12 @@ Escolha opcao **2** (Live).
 
 | Arquivo | O que contem |
 |---------|--------------|
-| `.env` | Credenciais e configuracoes |
-| `risk_state.json` | Estado do risk manager (capital, trades, drawdown) |
-| `forward_test_log.json` | Log de sinais e trades do forward testing |
-| `training_results.json` | Resultados do ultimo treinamento |
-| `trained_weights.js` | Pesos otimizados dos indicadores |
+| `.env` | Credenciais e todas as configuracoes (nunca versionado) |
+| `data/risk_state.json` | Estado do risk manager (capital, trades, drawdown) |
+| `data/forward_test_log.json` | Log de sinais e trades do forward test |
+| `training_results.json` | Resultados do ultimo treinamento (raiz do projeto) |
+| `trained_weights.js` | Pesos otimizados dos indicadores (raiz do projeto) |
+| `logs/atualizar_cotacoes.log` | Log da atualizacao do historico da B3 |
 
 ---
 
@@ -130,35 +134,37 @@ Escolha opcao **2** (Live).
 2. **SEMPRE** faca forward test antes de usar dinheiro real
 3. **MONITORE** o bot diariamente nas primeiras semanas
 4. **PARE** se tiver 5+ perdas consecutivas
-5. **COMECE** com 3-5 ativos apenas (nao 70+)
+5. **COMECE** com 3-5 ativos apenas (nao 90)
 
 ---
 
 ## Em Caso de Problemas
 
 ### Bot nao inicia
-```bash
-pip install yfinance pandas
-```
+- Ative o ambiente virtual e rode `pip install -r requirements.txt`
+- Confira se o comando foi executado na raiz do projeto
 
 ### Erro de conexao com MT5
-- Verifique se o MT5 esta instalado
-- Verifique credenciais no `.env`
-- Rode o teste: `python test_broker_connection.py`
+- Verifique se o MT5 esta instalado e aberto (Windows)
+- Verifique as credenciais `MT5_*` no `.env`
+- Rode o teste: `python3 training/test_broker_connection.py`
 
 ### Win rate muito baixo
-- Re-treine com `treinar_conservador.bat`
+- Retreine com `python3 training/train_conservative.py`
 - Aumente o `MIN_SCORE_BUY` no `.env`
 - Reduza a watchlist para ativos mais liquidos
+
+### Cotacoes com tag SIM ou erro de token
+- Veja a secao *Troubleshooting* do [README](../README.md#troubleshooting)
 
 ---
 
 ## Proximos Passos
 
-1. **Hoje**: Rodar forward test
-2. **Semana 1**: Acumular 50+ trades simulados
-3. **Semana 2**: Ajustar parametros se necessario, chegar em 100 trades
-4. **Semana 3**: Configurar MT5 com conta demo
-5. **Semana 4**: Iniciar com saldo real (R$500-1000)
+1. **Hoje**: rodar o forward test
+2. **Semana 1**: acumular 50+ trades simulados
+3. **Semana 2**: ajustar parametros se necessario, chegar em 100 trades
+4. **Semana 3**: configurar o MT5 com conta demo
+5. **Semana 4**: iniciar com saldo real (R$ 500-1000)
 
 Boa sorte!

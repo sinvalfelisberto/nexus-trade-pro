@@ -11,20 +11,21 @@ Para usar MetaTrader 5:
 
 import os
 from datetime import datetime
-from dotenv import load_dotenv
+import sys
 from abc import ABC, abstractmethod
 
-# Carregar .env da raiz do projeto
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+# Configuracao vem sempre do .env da raiz
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import env_config as cfg
 
 # Configuracoes do .env
-TRADING_MODE = os.getenv("TRADING_MODE", "PAPER")  # PAPER ou REAL
-BROKER_NAME = os.getenv("BROKER_NAME", "MT5")
-MAX_ORDER_VALUE = float(os.getenv("MAX_ORDER_VALUE", 1000))
-DAILY_LOSS_LIMIT = float(os.getenv("DAILY_LOSS_LIMIT", 500))
-RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", 2.0))
-STOP_LOSS_PERCENT = float(os.getenv("STOP_LOSS_PERCENT", 3.0))
-TAKE_PROFIT_PERCENT = float(os.getenv("TAKE_PROFIT_PERCENT", 6.0))
+TRADING_MODE = cfg.get_str("TRADING_MODE", "PAPER")  # PAPER ou REAL
+BROKER_NAME = cfg.get_str("BROKER_NAME", "MT5")
+MAX_ORDER_VALUE = cfg.get_float("MAX_ORDER_VALUE", 300.0)
+DAILY_LOSS_LIMIT = cfg.get_float("DAILY_LOSS_LIMIT", 150.0)
+RISK_PER_TRADE = cfg.get_float("RISK_PER_TRADE", 1.0)
+STOP_LOSS_PERCENT = cfg.get_float("STOP_LOSS_PERCENT", 4.0)
+TAKE_PROFIT_PERCENT = cfg.get_float("TAKE_PROFIT_PERCENT", 8.0)
 
 
 class BrokerInterface(ABC):
@@ -190,9 +191,9 @@ class MetaTrader5Broker(BrokerInterface):
     def __init__(self):
         self.mt5 = None
         self.connected = False
-        self.account = os.getenv("MT5_ACCOUNT", "")
-        self.password = os.getenv("MT5_PASSWORD", "")
-        self.server = os.getenv("MT5_SERVER", "")
+        self.account = cfg.get_str("MT5_ACCOUNT", "")
+        self.password = cfg.get_str("MT5_PASSWORD", "")
+        self.server = cfg.get_str("MT5_SERVER", "")
 
     def connect(self) -> bool:
         try:

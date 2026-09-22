@@ -22,11 +22,11 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, field
 from copy import deepcopy
-from dotenv import load_dotenv
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core"))
+import env_config as cfg  # configuracao sempre do .env da raiz
 
-load_dotenv()
-
-API_URL = "http://localhost:8000"
+API_URL = cfg.server_url()
 
 # ══════════════════════════════════════════════════════════════
 # CONFIGURACAO TURBO

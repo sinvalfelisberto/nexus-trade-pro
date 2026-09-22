@@ -13,12 +13,16 @@ Prioridade: Yahoo Finance > brapi.dev > Simulado
 """
 
 import os
+import sys
 import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import env_config as cfg
 
 # Cache simples
 _data_cache = {}
@@ -256,8 +260,7 @@ class BrapiProvider(DataProvider):
     """
 
     def __init__(self, token: str = ""):
-        self._token = token or os.getenv("BRAPI_TOKEN", "")
-        self._available = bool(self._token)
+        self._fixed_token = token
         if self._available:
             print("[DataProvider] brapi.dev: OK")
         else:
@@ -265,6 +268,15 @@ class BrapiProvider(DataProvider):
 
     def is_available(self) -> bool:
         return self._available
+
+    # Token lido do .env a cada uso, para refletir alteracoes sem reiniciar
+    @property
+    def _token(self) -> str:
+        return self._fixed_token or cfg.get_str("BRAPI_TOKEN")
+
+    @property
+    def _available(self) -> bool:
+        return bool(self._token)
 
     async def get_quote(self, ticker: str) -> Optional[Quote]:
         if not self._available:

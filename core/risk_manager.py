@@ -14,11 +14,15 @@ Recursos:
 """
 
 import os
+import sys
 import json
 from datetime import datetime, date
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Tuple, Optional
 from enum import Enum
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import env_config as cfg
 
 # Arquivo para persistir estado do risk manager (na pasta data/)
 RISK_STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "risk_state.json")
@@ -664,7 +668,12 @@ class RiskManager:
 
 
 # Instancia global
-risk_manager = RiskManager()
+# Instancia global configurada pelo .env (o capital so vale para estado novo;
+# um risk_state.json existente mantem o capital salvo)
+risk_manager = RiskManager(
+    config=RiskConfig(min_confidence_to_trade=cfg.get_float("MIN_CONFIDENCE", 55.0)),
+    initial_capital=cfg.get_float("INITIAL_CAPITAL", 500.0)
+)
 
 
 # === Funcoes de conveniencia ===

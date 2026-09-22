@@ -6,17 +6,16 @@ Execute este script para verificar se a integracao esta funcionando.
 
 import os
 import sys
-from dotenv import load_dotenv
-
-load_dotenv()
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "core"))
+import env_config as cfg  # configuracao sempre do .env da raiz
 
 print("=" * 60)
 print("  NEXUS TRADE PRO - Teste de Conexao")
 print("=" * 60)
 
 # Verificar configuracoes
-TRADING_MODE = os.getenv("TRADING_MODE", "PAPER")
-BROKER_NAME = os.getenv("BROKER_NAME", "MT5")
+TRADING_MODE = cfg.get_str("TRADING_MODE", "PAPER")
+BROKER_NAME = cfg.get_str("BROKER_NAME", "MT5")
 
 print(f"\n[CONFIG] Modo: {TRADING_MODE}")
 print(f"[CONFIG] Corretora: {BROKER_NAME}")

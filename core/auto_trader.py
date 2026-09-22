@@ -28,9 +28,8 @@ from typing import Dict, List, Tuple, Optional
 # Adicionar diretorio ao path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from dotenv import load_dotenv
-# Carregar .env da raiz do projeto
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+# Configuracao vem sempre do .env da raiz
+import env_config as cfg
 
 # Importar modulos do NexusTrade
 try:
@@ -75,30 +74,30 @@ CONFIG = {
     ],
 
     # Thresholds (do .env)
-    "min_score_buy": int(os.getenv("MIN_SCORE_BUY", 35)),
-    "min_score_sell": int(os.getenv("MIN_SCORE_SELL", -35)),
-    "min_confidence": int(os.getenv("MIN_CONFIDENCE", 55)),
+    "min_score_buy": cfg.get_int("MIN_SCORE_BUY", 35),
+    "min_score_sell": cfg.get_int("MIN_SCORE_SELL", -35),
+    "min_confidence": cfg.get_int("MIN_CONFIDENCE", 55),
 
     # Filtros de horario (do .env)
     "trading_hours": {
-        "start": os.getenv("TRADING_START", "10:00"),
-        "end": os.getenv("TRADING_END", "16:30"),
-        "lunch_start": os.getenv("LUNCH_START", "12:00"),
-        "lunch_end": os.getenv("LUNCH_END", "13:30")
+        "start": cfg.get_str("TRADING_START", "10:00"),
+        "end": cfg.get_str("TRADING_END", "16:30"),
+        "lunch_start": cfg.get_str("LUNCH_START", "12:00"),
+        "lunch_end": cfg.get_str("LUNCH_END", "13:30")
     },
 
     # Ignorar horario no modo simulacao
-    "ignore_trading_hours": os.getenv("IGNORE_TRADING_HOURS", "true").lower() == "true",
+    "ignore_trading_hours": cfg.get_bool("IGNORE_TRADING_HOURS", True),
 
     # Ciclo de execucao
     "scan_interval_seconds": 60,
-    "max_positions": int(os.getenv("MAX_POSITIONS", 3)),
+    "max_positions": cfg.get_int("MAX_POSITIONS", 3),
 
     # Capital e risco (do .env - sincronizado com dashboard R$500)
-    "initial_capital": float(os.getenv("INITIAL_CAPITAL", 500.0)),
-    "risk_per_trade": float(os.getenv("RISK_PER_TRADE", 1.0)) / 100,
-    "stop_loss_percent": float(os.getenv("STOP_LOSS_PERCENT", 4.0)),
-    "take_profit_percent": float(os.getenv("TAKE_PROFIT_PERCENT", 8.0)),
+    "initial_capital": cfg.get_float("INITIAL_CAPITAL", 500.0),
+    "risk_per_trade": cfg.get_float("RISK_PER_TRADE", 1.0) / 100,
+    "stop_loss_percent": cfg.get_float("STOP_LOSS_PERCENT", 4.0),
+    "take_profit_percent": cfg.get_float("TAKE_PROFIT_PERCENT", 8.0),
 
     # Forward testing (salva na pasta data/)
     "log_file": os.path.join(os.path.dirname(__file__), "..", "data", "forward_test_log.json"),

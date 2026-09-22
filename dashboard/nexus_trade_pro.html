@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NEXUS TRADE PRO v3.0 — AI Learning Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.1.1/dist/chartjs-chart-financial.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
 <style>
@@ -270,6 +270,30 @@ body {
 }
 
 /* Tags */
+.env-locked { opacity: 0.7; cursor: not-allowed; }
+.env-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.fav-star {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  color: var(--text-muted);
+  transition: color 0.15s, transform 0.15s;
+}
+.fav-star:hover { transform: scale(1.2); color: var(--warning); }
+.fav-star.active { color: var(--warning); }
+
 .tag {
   display: inline-flex;
   align-items: center;
@@ -450,6 +474,17 @@ label {
   height: 350px;
   position: relative;
 }
+
+.chart-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-bottom: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.chart-readout strong { color: var(--text-primary); font-weight: 600; }
 
 .chart-controls {
   display: flex;
@@ -716,6 +751,9 @@ input[type="range"]::-webkit-slider-thumb {
 
 <!-- PANEL: MERCADO -->
 <div id="panel-market" class="panel active">
+  <div class="search-bar">
+    <input id="quoteSearch" placeholder="Buscar acao por ticker ou setor (ex: PETR4, MGLU3, Banco)" oninput="renderQuotesGrid()" onkeydown="if(event.key==='Enter')openSearchedTicker()">
+  </div>
   <div class="grid" id="quotesGrid">
     <div class="card">
       <div class="card-title">Carregando cotacoes...</div>
@@ -726,11 +764,24 @@ input[type="range"]::-webkit-slider-thumb {
 <!-- PANEL: GRAFICOS -->
 <div id="panel-charts" class="panel">
   <div class="search-bar">
-    <input id="chartTicker" placeholder="Ticker (ex: PETR4)" value="PETR4">
-    <select id="chartTimeframe">
-      <option value="30">30 dias</option>
-      <option value="60">60 dias</option>
-      <option value="90">90 dias</option>
+    <select id="chartTicker" onchange="loadChart()" title="Favoritos aparecem primeiro"></select>
+    <select id="chartTimeframe" onchange="loadChart()">
+      <optgroup label="Velas diarias">
+        <option value="1mo|1d|30">30 dias</option>
+        <option value="3mo|1d|60">60 dias</option>
+        <option value="3mo|1d|90">90 dias</option>
+        <option value="6mo|1d|0">6 meses</option>
+        <option value="1y|1d|0">1 ano</option>
+      </optgroup>
+      <optgroup label="Velas semanais">
+        <option value="2y|1wk|0">2 anos (semanal)</option>
+      </optgroup>
+      <optgroup label="Velas mensais">
+        <option value="5y|1mo|0">5 anos (mensal)</option>
+      </optgroup>
+      <optgroup label="Velas anuais">
+        <option value="5y|1y|0">5 anos (anual)</option>
+      </optgroup>
     </select>
     <button class="btn btn-primary" onclick="loadChart()">CARREGAR</button>
   </div>
@@ -742,6 +793,7 @@ input[type="range"]::-webkit-slider-thumb {
       <button onclick="toggleIndicator('ema')">EMAs</button>
       <button onclick="toggleIndicator('volume')">Volume</button>
     </div>
+    <div class="chart-readout" id="chartReadout"></div>
     <div class="chart-wrapper">
       <canvas id="priceChart"></canvas>
     </div>
@@ -835,16 +887,16 @@ input[type="range"]::-webkit-slider-thumb {
             <input type="number" id="botConfidence" value="30" min="10" max="95">
           </div>
           <div>
-            <label>Stop Loss (%)</label>
-            <input type="number" id="botSL" value="3" min="1" max="10" step="0.5">
+            <label>Stop Loss (%) <span class="env-badge">.env</span></label>
+            <input type="number" id="botSL" value="4" step="0.5" title="Definido no .env — altere la e recarregue a pagina" readonly class="env-locked">
           </div>
           <div>
-            <label>Take Profit (%)</label>
-            <input type="number" id="botTP" value="6" min="2" max="20" step="0.5">
+            <label>Take Profit (%) <span class="env-badge">.env</span></label>
+            <input type="number" id="botTP" value="8" step="0.5" title="Definido no .env — altere la e recarregue a pagina" readonly class="env-locked">
           </div>
           <div>
-            <label>Max por ordem (R$)</label>
-            <input type="number" id="botMaxOrder" value="100" min="10" max="500" step="10">
+            <label>Max por ordem (R$) <span class="env-badge">.env</span></label>
+            <input type="number" id="botMaxOrder" value="300" step="10" title="Definido no .env — altere la e recarregue a pagina" readonly class="env-locked">
           </div>
           <div>
             <label>Trailing Stop</label>
@@ -1214,7 +1266,7 @@ input[type="range"]::-webkit-slider-thumb {
   </div>
 
   <div style="margin-top:20px;display:flex;gap:12px;">
-    <button class="btn btn-danger" onclick="resetPortfolio()">RESETAR PORTFOLIO (R$ 500)</button>
+    <button class="btn btn-danger" onclick="resetPortfolio()" id="resetPortfolioBtn">RESETAR PORTFOLIO (R$ 500)</button>
   </div>
 </div>
 
@@ -1225,13 +1277,21 @@ input[type="range"]::-webkit-slider-thumb {
 // NEXUS TRADE PRO v3.0 - AI LEARNING SYSTEM
 // ══════════════════════════════════════════════════════════════════════════════
 
-const API = 'http://localhost:8000';
+// Servido pelo proprio servidor: usa a mesma origem (porta do SERVER_PORT no .env).
+// Aberto como arquivo local: cai no padrao localhost:8000.
+const API = location.protocol.startsWith('http') ? location.origin : 'http://localhost:8000';
+
+// Configuracoes vindas do .env via /api/config (valores padrao = .env.example)
+let appConfig = {
+  initial_capital: 500, max_order_value: 300, max_positions: 3,
+  stop_loss_percent: 4, take_profit_percent: 8, risk_per_trade: 1
+};
 let botRunning = false;
 let botTimer = null;
 let priceChart = null;
 let pnlChart = null;
 let learningChart = null;
-let chartData = { prices: [], dates: [], volumes: [] };
+let chartData = { prices: [], dates: [], volumes: [], interval: '1d' };
 let chartIndicators = { bb: false, ema: false, volume: false };
 let chartType = 'candlestick';
 
@@ -1239,7 +1299,7 @@ let chartType = 'candlestick';
 // PORTFOLIO & LEARNING DATA
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Inicializar portfolio com R$ 500
+// Portfolio inicial (capital vem do INITIAL_CAPITAL do .env, aplicado em applyEnvConfig)
 const DEFAULT_PORTFOLIO = {
   balance: 500,
   positions: [],
@@ -1288,8 +1348,25 @@ function saveLearning() {
   localStorage.setItem('ntp_learning', JSON.stringify(learningData));
 }
 
+const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
 function formatCurrency(value) {
-  return 'R$ ' + value.toFixed(2).replace('.', ',');
+  if (value == null) return 'R$ --';
+  const n = Number(value);
+  return Number.isFinite(n) ? BRL.format(n) : 'R$ --';
+}
+
+function formatPercent(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.abs(n).toFixed(2).replace('.', ',') + '%' : '--';
+}
+
+function formatVolume(value) {
+  const n = Number(value) || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(1).replace('.', ',') + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace('.', ',') + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace('.', ',') + 'K';
+  return String(n);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1309,11 +1386,10 @@ async function syncWithAutoTrader() {
         id: t.timestamp,
         ticker: t.ticker,
         type: t.action,
-        quantity: t.quantity,
-        price: t.entry_price,
-        currentPrice: t.entry_price,
-        pnl: 0,
-        pnlPercent: 0,
+        qty: t.quantity,
+        entryPrice: t.entry_price,
+        stopLoss: t.stop_loss ?? t.entry_price * 0.96,
+        takeProfit: t.take_profit ?? t.entry_price * 1.08,
         timestamp: t.timestamp
       }));
     }
@@ -1324,12 +1400,12 @@ async function syncWithAutoTrader() {
         id: t.timestamp,
         ticker: t.ticker,
         type: t.action,
-        quantity: t.quantity,
+        qty: t.quantity,
         price: t.entry_price,
         exitPrice: t.exit_price || 0,
         pnl: t.pnl || 0,
         status: t.status,
-        timestamp: t.timestamp,
+        time: t.timestamp,
         source: 'AUTO_TRADER'
       }));
 
@@ -1438,7 +1514,7 @@ async function checkBrokerStatus() {
     const balanceRes = await fetch(API + '/api/broker/balance');
     const balance = await balanceRes.json();
     if (balance.balance !== undefined) {
-      document.getElementById('brokerBalance').textContent = 'R$ ' + balance.balance.toFixed(2);
+      document.getElementById('brokerBalance').textContent = formatCurrency(balance.balance);
       brokerConnected = true;
     }
 
@@ -1512,7 +1588,7 @@ async function executeBrokerTrade(ticker, action, quantity) {
 
     if (result.success) {
       const order = result.order;
-      addLog(`${action} ${order.quantity}x ${ticker} @ R$ ${order.price.toFixed(2)} [${tradingMode}]`, 'success');
+      addLog(`${action} ${order.quantity}x ${ticker} @ ${formatCurrency(order.price)} [${tradingMode}]`, 'success');
       checkBrokerStatus(); // Atualizar saldo
       return result;
     } else {
@@ -1641,46 +1717,91 @@ function addRandomVariation(quote) {
   };
 }
 
+let lastQuotes = {};
+let favorites = new Set(JSON.parse(localStorage.getItem('ntp_favorites') || '[]'));
+let extraTickers = new Set();   // tickers fora da watchlist buscados nesta sessao
+let lookupStatus = {};          // ticker -> 'loading' | mensagem de erro
+let lookupTimer = null;
+const TICKER_RE = /^[A-Z0-9]{4}\d{1,2}F?$/;
+
 async function loadQuotes() {
-  const grid = document.getElementById('quotesGrid');
   let quotesData = {};
   let isSimulated = false;
 
   try {
-    const r = await fetch(API + '/api/quotes?tickers=' + WATCHLIST.slice(0, 30).join(','));
+    // Inclui favoritos e tickers buscados que estao fora da watchlist
+    const tickers = [...new Set([...WATCHLIST.slice(0, 30), ...favorites, ...extraTickers])];
+    const r = await fetch(API + '/api/quotes?tickers=' + tickers.join(','));
     const d = await r.json();
 
-    // Verificar se temos dados reais validos
-    let validCount = 0;
     for (const [ticker, q] of Object.entries(d.quotes || {})) {
       if (!q.error && q.price > 0) {
         quotesData[ticker] = { ...q, source: 'REAL' };
-        validCount++;
       }
-    }
-
-    // Se menos de 5 quotes validas, usar simulados
-    if (validCount < 5) {
-      throw new Error('API limitada');
     }
   } catch {
-    // Usar dados simulados
-    isSimulated = true;
-    for (const ticker of WATCHLIST) {
-      if (SIMULATED_QUOTES[ticker]) {
-        quotesData[ticker] = { ...addRandomVariation(SIMULATED_QUOTES[ticker]), source: 'SIM' };
-      }
+    // Servidor offline: tudo sera simulado abaixo
+  }
+
+  // Simular apenas os tickers sem cotacao real, para nunca exibir um preco
+  // simulado de um ativo cuja cotacao real esta disponivel
+  for (const ticker of WATCHLIST) {
+    if (!quotesData[ticker] && SIMULATED_QUOTES[ticker]) {
+      quotesData[ticker] = { ...addRandomVariation(SIMULATED_QUOTES[ticker]), source: 'SIM' };
+      isSimulated = true;
     }
   }
 
+  lastQuotes = quotesData;
+  renderQuotesGrid();
+
+  if (isSimulated) {
+    console.log('Alguns ativos sem cotacao real - exibindo dados simulados (tag SIM)');
+  }
+}
+
+function toggleFavorite(ticker) {
+  if (favorites.has(ticker)) favorites.delete(ticker);
+  else favorites.add(ticker);
+  localStorage.setItem('ntp_favorites', JSON.stringify([...favorites]));
+  renderQuotesGrid();
+  renderChartTickerOptions();
+}
+
+// Combobox de acoes do grafico: favoritos primeiro, depois as demais em ordem alfabetica
+function renderChartTickerOptions() {
+  const select = document.getElementById('chartTicker');
+  const current = select.value;
+  const favs = [...favorites].sort();
+  const others = [...new Set([...WATCHLIST, ...extraTickers])].filter(t => !favorites.has(t)).sort();
+  const option = t => {
+    const sector = SIMULATED_QUOTES[t]?.sector || lastQuotes[t]?.sector;
+    return `<option value="${t}">${t}${sector ? ' — ' + sector : ''}</option>`;
+  };
+
+  select.innerHTML =
+    (favs.length ? `<optgroup label="★ Favoritos">${favs.map(option).join('')}</optgroup>` : '') +
+    `<optgroup label="Todas as acoes">${others.map(option).join('')}</optgroup>`;
+
+  // Mantem a selecao atual; na primeira vez, comeca pelo primeiro favorito (ou PETR4)
+  const all = [...favs, ...others];
+  select.value = all.includes(current) ? current : (favs[0] || (all.includes('PETR4') ? 'PETR4' : all[0]));
+}
+
+function renderQuotesGrid() {
+  const grid = document.getElementById('quotesGrid');
   grid.innerHTML = '';
 
-  // Ordenar por volume
-  const sortedQuotes = Object.entries(quotesData)
-    .sort((a, b) => (b[1].volume || 0) - (a[1].volume || 0));
+  const term = document.getElementById('quoteSearch').value.trim().toUpperCase();
+
+  // Favoritos primeiro, depois por volume
+  const sortedQuotes = Object.entries(lastQuotes)
+    .filter(([ticker, q]) => !term || ticker.includes(term) || (q.sector || '').toUpperCase().includes(term))
+    .sort((a, b) => (favorites.has(b[0]) - favorites.has(a[0])) || ((b[1].volume || 0) - (a[1].volume || 0)));
 
   for (const [ticker, q] of sortedQuotes) {
-    const isUp = (q.changePercent || 0) >= 0;
+    const isFav = favorites.has(ticker);
+    const isUp = (Number(q.changePercent) || 0) >= 0;
     const tagType = q.source === 'REAL' ? 'tag-live' : 'tag-sim';
     const tagText = q.source === 'REAL' ? 'LIVE' : 'SIM';
 
@@ -1688,23 +1809,77 @@ async function loadQuotes() {
       <div class="card" style="cursor:pointer" onclick="document.getElementById('analysisInput').value='${ticker}';switchTabDirect('analysis');runAnalysis();">
         <div class="card-header">
           <div class="card-title">${ticker}</div>
-          <span class="tag ${tagType}">${tagText}</span>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <button class="fav-star ${isFav ? 'active' : ''}" title="${isFav ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}" onclick="event.stopPropagation();toggleFavorite('${ticker}');">${isFav ? '★' : '☆'}</button>
+            <span class="tag ${tagType}">${tagText}</span>
+          </div>
         </div>
         <div class="card-value ${isUp ? 'positive' : 'negative'}">
-          ${formatCurrency(q.price || 0)}
+          ${formatCurrency(q.price)}
         </div>
         <div class="card-change ${isUp ? 'positive' : 'negative'}">
-          ${isUp ? '▲' : '▼'} ${Math.abs(q.changePercent || 0).toFixed(2)}%
+          ${isUp ? '▲' : '▼'} ${formatPercent(q.changePercent || 0)}
         </div>
         <div style="font-size:10px;color:var(--text-muted);margin-top:8px;">
-          Vol: ${((q.volume || 0)/1000000).toFixed(1)}M ${q.sector ? '| ' + q.sector : ''}
+          Vol: ${formatVolume(q.volume)} ${q.sector ? '| ' + q.sector : ''}
         </div>
       </div>`;
   }
 
-  if (isSimulated) {
-    console.log('Usando dados simulados - API brapi.dev com limite atingido');
+  if (term && sortedQuotes.length === 0) {
+    const status = lookupStatus[term];
+    let msg;
+    if (!TICKER_RE.test(term)) {
+      msg = `Nenhuma acao encontrada para "${escapeHtml(term)}"`;
+    } else if (status === undefined || status === 'loading') {
+      msg = `Buscando ${escapeHtml(term)}...`;
+      scheduleLookup(term);
+    } else {
+      msg = `${escapeHtml(term)} nao encontrada: ${escapeHtml(status)}`;
+    }
+    grid.innerHTML = `<div class="card"><div class="card-title">${msg}</div></div>`;
   }
+}
+
+// Busca na API um ticker que nao esta na lista e adiciona o card a grade
+function scheduleLookup(ticker) {
+  clearTimeout(lookupTimer);
+  lookupTimer = setTimeout(() => lookupTicker(ticker), 400);
+}
+
+async function lookupTicker(ticker) {
+  if (lastQuotes[ticker] || lookupStatus[ticker] === 'loading') return;
+  lookupStatus[ticker] = 'loading';
+  try {
+    const r = await fetch(`${API}/api/quote/${ticker}`);
+    const q = await r.json();
+    if (q.error || !(q.price > 0)) {
+      lookupStatus[ticker] = q.error || 'sem cotacao';
+    } else {
+      lastQuotes[ticker] = { ...q, source: 'REAL' };
+      extraTickers.add(ticker);
+      renderChartTickerOptions();
+      delete lookupStatus[ticker];
+    }
+  } catch {
+    lookupStatus[ticker] = 'servidor offline';
+  }
+  // So redesenha se o usuario ainda estiver buscando esse ticker
+  if (document.getElementById('quoteSearch').value.trim().toUpperCase() === ticker) renderQuotesGrid();
+}
+
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Enter na busca: busca na hora um ticker fora da lista (sem esperar o debounce)
+function openSearchedTicker() {
+  const term = document.getElementById('quoteSearch').value.trim().toUpperCase();
+  if (!TICKER_RE.test(term) || lastQuotes[term]) return;
+  clearTimeout(lookupTimer);
+  delete lookupStatus[term];  // permite tentar de novo apos um erro
+  renderQuotesGrid();
+  lookupTicker(term);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1712,12 +1887,12 @@ async function loadQuotes() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function loadChart() {
-  const ticker = document.getElementById('chartTicker').value.trim().toUpperCase() || 'PETR4';
-  const days = parseInt(document.getElementById('chartTimeframe').value);
+  const ticker = document.getElementById('chartTicker').value || 'PETR4';
+  const [range, interval, days] = document.getElementById('chartTimeframe').value.split('|');
 
   try {
     const [histRes, indRes, advRes] = await Promise.all([
-      fetch(API + '/api/history/' + ticker + '?days=' + days),
+      fetch(`${API}/api/chart/${ticker}?range=${range}&interval=${interval}&days=${days}`),
       fetch(API + '/api/indicators/' + ticker),
       fetch(API + '/api/advanced/' + ticker)
     ]);
@@ -1726,10 +1901,17 @@ async function loadChart() {
     const ind = await indRes.json();
     const adv = await advRes.json();
 
+    if (histRes.status === 404 && hist.detail) {
+      throw new Error('endpoint /api/chart nao existe neste servidor — reinicie o servidor (python3 core/server_fastmcp.py http)');
+    }
     if (hist.error) throw new Error(hist.error);
+    if (!histRes.ok) throw new Error(`HTTP ${histRes.status}`);
 
     const data = hist.data || [];
+    if (!data.length) throw new Error('nenhum dado historico retornado para ' + ticker);
     chartData = {
+      interval,
+      source: hist.source || '',
       dates: data.map(d => new Date(d.date * 1000)),
       prices: data.map(d => ({ o: d.open, h: d.high, l: d.low, c: d.close })),
       closes: data.map(d => d.close),
@@ -1740,6 +1922,11 @@ async function loadChart() {
     renderChartIndicators(ind, adv);
   } catch(e) {
     console.error('Chart error:', e);
+    if (priceChart) { priceChart.destroy(); priceChart = null; }
+    chartData = { prices: [], dates: [], closes: [], volumes: [], interval: '1d' };
+    const msg = e instanceof TypeError && /fetch/i.test(e.message) ? 'servidor offline' : e.message;
+    document.getElementById('chartReadout').innerHTML =
+      `<span style="color:var(--danger);">Erro ao carregar historico de ${escapeHtml(ticker)}: ${escapeHtml(msg)}</span>`;
   }
 }
 
@@ -1753,14 +1940,14 @@ function renderChart() {
     datasets.push({
       label: 'Preco',
       data: chartData.dates.map((d, i) => ({
-        x: d,
+        x: d.getTime(),
         o: chartData.prices[i].o,
         h: chartData.prices[i].h,
         l: chartData.prices[i].l,
         c: chartData.prices[i].c
       })),
-      borderColor: 'var(--accent)',
-      color: { up: '#10b981', down: '#ef4444', unchanged: '#64748b' }
+      backgroundColors: { up: '#10b981', down: '#ef4444', unchanged: '#64748b' },
+      borderColors: { up: '#10b981', down: '#ef4444', unchanged: '#64748b' }
     });
   } else {
     datasets.push({
@@ -1777,11 +1964,11 @@ function renderChart() {
 
   if (chartIndicators.ema && chartData.closes.length >= 21) {
     datasets.push({
-      label: 'EMA 9', data: calcEMA(chartData.closes, 9),
+      type: 'line', label: 'EMA 9', data: calcEMA(chartData.closes, 9),
       borderColor: '#3b82f6', borderWidth: 1, fill: false, pointRadius: 0
     });
     datasets.push({
-      label: 'EMA 21', data: calcEMA(chartData.closes, 21),
+      type: 'line', label: 'EMA 21', data: calcEMA(chartData.closes, 21),
       borderColor: '#8b5cf6', borderWidth: 1, fill: false, pointRadius: 0
     });
   }
@@ -1789,28 +1976,103 @@ function renderChart() {
   if (chartIndicators.bb && chartData.closes.length >= 20) {
     const bb = calcBB(chartData.closes, 20, 2);
     datasets.push({
-      label: 'BB Upper', data: bb.upper,
+      type: 'line', label: 'BB Upper', data: bb.upper,
       borderColor: 'rgba(239, 68, 68, 0.5)', borderWidth: 1, borderDash: [5,5], fill: false, pointRadius: 0
     });
     datasets.push({
-      label: 'BB Lower', data: bb.lower,
+      type: 'line', label: 'BB Lower', data: bb.lower,
       borderColor: 'rgba(16, 185, 129, 0.5)', borderWidth: 1, borderDash: [5,5], fill: false, pointRadius: 0
     });
   }
 
+  // O plugin financeiro (v0.2) precisa de eixo 'timeseries', x numerico e sem labels;
+  // com labels + eixo 'time' as velas ficam com a largura do grafico inteiro
+  const isCandle = chartType === 'candlestick';
+  const xAxisDates = isCandle ? chartData.dates.map(d => d.getTime()) : chartData.dates;
+  if (isCandle) {
+    datasets.slice(1).forEach(ds => { ds.data = ds.data.map((y, i) => ({ x: xAxisDates[i], y })); });
+  }
+
   priceChart = new Chart(ctx, {
-    type: chartType === 'candlestick' ? 'candlestick' : 'line',
-    data: { labels: chartData.dates, datasets },
+    type: isCandle ? 'candlestick' : 'line',
+    data: isCandle ? { datasets } : { labels: chartData.dates, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      interaction: { mode: 'index', intersect: false },
+      hover: { mode: 'index', intersect: false },  // o plugin financeiro sobrescreve com 'label'
+      onHover: (event, elements) => updateChartReadout(elements.length ? elements[0].index : null),
+      plugins: {
+        legend: { display: datasets.length > 1, labels: { color: '#94a3b8', boxWidth: 12, font: { size: 10 } } },
+        tooltip: {
+          callbacks: {
+            title: items => items.length ? formatChartDate(chartData.dates[items[0].dataIndex]) : '',
+            label: item => {
+              const raw = item.raw;
+              if (raw && typeof raw === 'object' && 'o' in raw) {
+                return [`Abertura: ${formatCurrency(raw.o)}`, `Maxima: ${formatCurrency(raw.h)}`,
+                        `Minima: ${formatCurrency(raw.l)}`, `Fechamento: ${formatCurrency(raw.c)}`];
+              }
+              const v = typeof raw === 'object' && raw !== null ? raw.y : raw;
+              return v == null ? null : `${item.dataset.label}: ${formatCurrency(v)}`;
+            }
+          }
+        }
+      },
       scales: {
-        x: { type: 'time', time: { unit: 'day' }, grid: { color: '#1a1a24' }, ticks: { color: '#64748b' } },
-        y: { grid: { color: '#1a1a24' }, ticks: { color: '#64748b' } }
+        x: { type: isCandle ? 'timeseries' : 'time', time: { unit: ({ '1d': 'day', '1wk': 'week', '1mo': 'month', '1y': 'year' })[chartData.interval] || 'day' }, grid: { color: '#1a1a24' }, ticks: { color: '#64748b' } },
+        y: { grid: { color: '#1a1a24' }, ticks: { color: '#64748b', callback: v => formatCurrency(v) } }
       }
     }
   });
+
+  if (!ctx.canvas.dataset.readoutBound) {
+    ctx.canvas.addEventListener('mouseleave', () => updateChartReadout(null));
+    ctx.canvas.dataset.readoutBound = '1';
+  }
+  updateChartReadout(null);
+}
+
+function formatChartDate(d) {
+  if (!d) return '';
+  switch (chartData.interval) {
+    case '1y': return String(d.getFullYear());
+    case '1mo': return d.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+    case '1wk': return 'Semana de ' + d.toLocaleDateString('pt-BR');
+    default: return d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+}
+
+// Painel acima do grafico: valores do dia sob o mouse (ou do ultimo pregao)
+function updateChartReadout(index) {
+  const el = document.getElementById('chartReadout');
+  const n = chartData.dates.length;
+  if (!n) { el.innerHTML = ''; return; }
+  const i = index ?? n - 1;
+  const p = chartData.prices[i];
+  const prevClose = i > 0 ? chartData.prices[i - 1].c : p.o;
+  const change = prevClose ? (p.c - prevClose) / prevClose * 100 : 0;
+  const cls = change >= 0 ? 'positive' : 'negative';
+
+  const items = [
+    `<strong>${formatChartDate(chartData.dates[i])}</strong>${index == null ? ' (ultimo)' : ''}`,
+    `Abertura <strong>${formatCurrency(p.o)}</strong>`,
+    `Maxima <strong>${formatCurrency(p.h)}</strong>`,
+    `Minima <strong>${formatCurrency(p.l)}</strong>`,
+    `Fechamento <strong>${formatCurrency(p.c)}</strong>`,
+    `Var. <strong class="${cls}">${change >= 0 ? '▲' : '▼'} ${formatPercent(change)}</strong>`,
+    `Volume <strong>${formatVolume(chartData.volumes[i])}</strong>`
+  ];
+  if (chartData.source) items.push(`Fonte <strong>${escapeHtml(chartData.source)}</strong>`);
+  if (chartIndicators.ema && n >= 21) {
+    items.push(`EMA 9 <strong>${formatCurrency(calcEMA(chartData.closes, 9)[i])}</strong>`);
+    items.push(`EMA 21 <strong>${formatCurrency(calcEMA(chartData.closes, 21)[i])}</strong>`);
+  }
+  if (chartIndicators.bb && n >= 20) {
+    const bb = calcBB(chartData.closes, 20, 2);
+    items.push(`BB <strong>${formatCurrency(bb.lower[i])} – ${formatCurrency(bb.upper[i])}</strong>`);
+  }
+  el.innerHTML = items.map(t => `<span>${t}</span>`).join('');
 }
 
 function calcEMA(data, period) {
@@ -1893,6 +2155,10 @@ async function runAnalysis() {
   try {
     const r = await fetch(API + '/api/analysis/' + ticker);
     const d = await r.json();
+    if (d.error || d.quote?.error || !(d.quote?.price > 0)) {
+      div.innerHTML = `<div style="color:var(--danger);padding:20px;">Cotacao indisponivel para ${ticker}: ${d.error || d.quote?.error || 'sem dados'}</div>`;
+      return;
+    }
     const q = d.quote || {};
     const ind = d.indicators || {};
     const adv = d.advanced || {};
@@ -1904,8 +2170,8 @@ async function runAnalysis() {
       <div class="grid">
         <div class="metric-card ${isUp ? 'success' : 'danger'}">
           <div class="card-title">${ticker} - COTACAO</div>
-          <div class="card-value ${isUp ? 'positive' : 'negative'}">${formatCurrency(q.price || 0)}</div>
-          <div class="card-change ${isUp ? 'positive' : 'negative'}">${isUp ? '▲' : '▼'} ${(q.changePercent || 0).toFixed(2)}%</div>
+          <div class="card-value ${isUp ? 'positive' : 'negative'}">${formatCurrency(q.price)}</div>
+          <div class="card-change ${isUp ? 'positive' : 'negative'}">${isUp ? '▲' : '▼'} ${formatPercent(q.changePercent || 0)}</div>
         </div>
         <div class="metric-card accent">
           <div class="card-header">
@@ -1931,7 +2197,7 @@ async function runAnalysis() {
             ADX: <span style="color:${(adv.adx?.value||0)>=25?'var(--success)':'var(--text-muted)'}">${adv.adx?.value?.toFixed(1)||'--'}</span> (${adv.adx?.trend_strength||'--'})<br>
             Stochastic: ${adv.stochastic?.k?.toFixed(1)||'--'} (${adv.stochastic?.signal||'--'})<br>
             ATR: ${adv.atr?.percent?.toFixed(2)||'--'}%<br>
-            VWAP: ${formatCurrency(adv.vwap?.value||0)} (${adv.vwap?.position||'--'})
+            VWAP: ${adv.vwap?.value ? formatCurrency(adv.vwap.value) : '--'} (${adv.vwap?.position||'--'})
           </div>
         </div>
       </div>
@@ -2193,7 +2459,7 @@ async function loadTrainingResults() {
     // Tentar primeiro via API, depois arquivo local
     let data;
     try {
-      const r = await fetch(`${SERVER_URL}/api/training-results`);
+      const r = await fetch(`${API}/api/training-results`);
       data = await r.json();
     } catch {
       const r = await fetch('training_results.json');
@@ -2524,10 +2790,14 @@ function renderLearningChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: item => `Acuracia: ${Number(item.raw).toFixed(1).replace('.', ',')}%` } }
+      },
       scales: {
         x: { grid: { color: '#1a1a24' }, ticks: { color: '#64748b' } },
-        y: { min: 0, max: 100, grid: { color: '#1a1a24' }, ticks: { color: '#64748b' } }
+        y: { min: 0, max: 100, grid: { color: '#1a1a24' }, ticks: { color: '#64748b', callback: v => v + '%' } }
       }
     }
   });
@@ -2591,7 +2861,7 @@ async function runBot() {
   const tpPercent = parseFloat(document.getElementById('botTP').value);
   const trailingType = document.getElementById('trailingType').value;
   const strategy = document.getElementById('botStrategy').value;
-  const maxPositions = 5;
+  const maxPositions = appConfig.max_positions;
 
   await updateMarketNews();
   const marketSentiment = getMarketSentiment();
@@ -2919,10 +3189,20 @@ function renderPnLChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => items.length ? new Date(items[0].raw.x).toLocaleString('pt-BR') : '',
+            label: item => `P&L acumulado: ${formatCurrency(item.raw.y)}`,
+            afterLabel: item => `Trade: ${trades[item.dataIndex].ticker} ${formatCurrency(trades[item.dataIndex].pnl || 0)}`
+          }
+        }
+      },
       scales: {
         x: { type: 'time', grid: { color: '#1a1a24' }, ticks: { color: '#64748b' } },
-        y: { grid: { color: '#1a1a24' }, ticks: { color: '#64748b' } }
+        y: { grid: { color: '#1a1a24' }, ticks: { color: '#64748b', callback: v => formatCurrency(v) } }
       }
     }
   });
@@ -2980,12 +3260,12 @@ function updatePortfolioUI() {
 }
 
 function resetPortfolio() {
-  if (confirm('Resetar portfolio para R$ 500? Todas as posicoes e historico serao apagados.')) {
+  if (confirm(`Resetar portfolio para ${formatCurrency(DEFAULT_PORTFOLIO.balance)}? Todas as posicoes e historico serao apagados.`)) {
     portfolio = JSON.parse(JSON.stringify(DEFAULT_PORTFOLIO));
     savePortfolio();
     updatePortfolioUI();
     updateHistoryPanel();
-    addLog('Portfolio resetado para R$ 500', 'info');
+    addLog(`Portfolio resetado para ${formatCurrency(DEFAULT_PORTFOLIO.balance)}`, 'info');
   }
 }
 
@@ -3039,9 +3319,37 @@ async function calcPosition() {
 // INITIALIZATION
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Busca as configuracoes do .env no servidor e aplica no dashboard.
+// Campos marcados com .env sempre usam o valor do servidor, mesmo com config salva no navegador.
+async function applyEnvConfig() {
+  try {
+    const r = await fetch(API + '/api/config');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    appConfig = { ...appConfig, ...(await r.json()) };
+  } catch (e) {
+    console.log('[CONFIG] Usando valores padrao (servidor sem /api/config):', e.message);
+  }
+
+  document.getElementById('botSL').value = appConfig.stop_loss_percent;
+  document.getElementById('botTP').value = appConfig.take_profit_percent;
+  document.getElementById('botMaxOrder').value = appConfig.max_order_value;
+  document.getElementById('calcCapital').value = appConfig.initial_capital;
+  document.getElementById('calcRisk').value = appConfig.risk_per_trade;
+
+  DEFAULT_PORTFOLIO.balance = appConfig.initial_capital;
+  DEFAULT_PORTFOLIO.initialBalance = appConfig.initial_capital;
+  document.getElementById('resetPortfolioBtn').textContent = `RESETAR PORTFOLIO (${formatCurrency(appConfig.initial_capital)})`;
+  // Portfolio nunca usado ainda: adota o capital do .env
+  if (!localStorage.getItem('ntp_portfolio_v3')) {
+    portfolio = JSON.parse(JSON.stringify(DEFAULT_PORTFOLIO));
+  }
+}
+
 async function init() {
   loadBotConfig();
   updateWeightDisplay();
+  renderChartTickerOptions();
+  await applyEnvConfig();
 
   await checkServer();
   await loadQuotes();
