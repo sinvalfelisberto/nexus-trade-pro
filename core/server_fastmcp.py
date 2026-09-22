@@ -1272,9 +1272,19 @@ async def full_analysis(ticker: str) -> dict:
 # ══════════════════════════════════════════════════════════════
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 app = FastAPI(title="Nexus Trade Pro API v2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+@app.get("/")
+@app.get("/dashboard")
+async def serve_dashboard():
+    """Serve a interface web do dashboard"""
+    dashboard_path = os.path.join(os.path.dirname(__file__), "..", "dashboard", "nexus_trade_pro.html")
+    if os.path.exists(dashboard_path):
+        return FileResponse(dashboard_path)
+    return {"message": "Nexus Trade Pro API online, mas o arquivo dashboard/nexus_trade_pro.html nao foi encontrado."}
 
 @app.get("/api/status")
 async def api_status():
