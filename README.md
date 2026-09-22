@@ -64,12 +64,15 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your API keys
 
-# Start the server
-python core/server_fastmcp.py
+# Start the HTTP server (required by the dashboard)
+python core/server_fastmcp.py http
+# Wait for "Uvicorn running on http://0.0.0.0:8000" and keep this terminal open
 
 # Open dashboard in browser
 # Navigate to dashboard/nexus_trade_pro.html
 ```
+
+> **Note:** The `http` argument is required for the dashboard. Without it, the server starts in MCP (stdio) mode for MCP clients such as Claude Desktop, opens no port, and the dashboard shows "Servidor offline". You can check that the API is up at http://localhost:8000/api/status.
 
 ## Project Structure
 
