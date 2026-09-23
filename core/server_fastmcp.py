@@ -1437,6 +1437,8 @@ def _b3_update_loop():
                 conn = b3_history.connect()
                 try:
                     b3_history.update(conn)
+                    import b3_proventos
+                    b3_proventos.update(conn, max_age_days=1)  # cada emissor no maximo 1x por dia
                 finally:
                     conn.close()
             except Exception as e:

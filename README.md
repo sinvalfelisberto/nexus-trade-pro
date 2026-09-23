@@ -33,6 +33,7 @@ The system uses an ensemble of 5 optimization algorithms (Genetic Algorithm, Sim
 - **Market data:**
   - [brapi.dev](https://brapi.dev) — current quotes (free plan: ~30 min delay, 3 months of history)
   - **B3 official history** (COTAHIST files) stored in MySQL — daily candles for the charts
+  - **B3 listed companies API** — dividends, interest on equity (JCP), REIT income and stock events, stored in MySQL
   - Yahoo Finance — fallback provider for the analysis modules
 - **ML Framework:** Custom ensemble with walk-forward validation
 - **APIs:** Tavily AI (news sentiment), WhatsApp (alerts, placeholder)
@@ -47,6 +48,7 @@ The system uses an ensemble of 5 optimization algorithms (Genetic Algorithm, Sim
 - **Advanced Indicators:** RSI, MACD, Bollinger Bands, ADX, Stochastic, VWAP, OBV, ATR
 - **Ensemble Model** with 5 optimization strategies
 - **Risk Manager** with drawdown control, position sizing, circuit breaker
+- **Dividends database:** dividends, JCP, FII income, splits and bonus shares from B3, linked to tickers by ISIN
 - **Paper Trading Mode** for safe strategy testing
 - **Single source of configuration:** everything is read from `.env` (API keys reload without restart)
 
@@ -115,11 +117,12 @@ Without this step the charts use brapi, which on the free plan only covers the l
 With it, the charts show up to 5 years of official B3 daily data.
 
 ```bash
-python3 core/b3_history.py --carga       # first load: ~6 min, ~1.45M rows, ~280 MB
+python3 core/b3_history.py --carga       # quotes, first load: ~6 min, ~1.45M rows, ~280 MB
 python3 core/b3_history.py --status      # rows, tickers, first/last trading day
+python3 core/b3_proventos.py --atualizar # dividends/JCP/FII income of ~1,570 issuers: ~12 min
 ```
 
-The tables (`bolsa_cotacoes_diarias`, `bolsa_arquivos_importados`) are created automatically in the database set in `DB_OLD_NAME`. Details: [docs/HISTORICO_B3.md](docs/HISTORICO_B3.md).
+The `bolsa_*` tables (quotes, assets, dividends) and the `bolsa_vw_proventos` view are created automatically in the database set in `DB_OLD_NAME`. The B3 API only returns the last ~12 months of dividends, so the dividends table accumulates history from the first load on. Details: [docs/HISTORICO_B3.md](docs/HISTORICO_B3.md).
 
 ### 6. Start the server
 
@@ -157,10 +160,10 @@ Go to **<http://localhost:8000/dashboard>** (use the port from `SERVER_PORT` if 
 
 ### 9. Keep the B3 history up to date
 
-The server imports missing trading days on startup and every `B3_UPDATE_HOURS` hours. To update manually (e.g. with the server off):
+The server imports missing trading days and refreshes dividends on startup and every `B3_UPDATE_HOURS` hours. To update manually (e.g. with the server off):
 
 ```bash
-scripts/atualizar_cotacoes.sh              # Linux/macOS - finds and imports missing days
+scripts/atualizar_cotacoes.sh              # Linux/macOS - missing trading days + dividends
 scripts/atualizar_cotacoes.sh --verificar  # only lists what is missing
 scripts\atualizar_cotacoes.bat             # Windows
 ```
@@ -197,6 +200,7 @@ nexus-trade-pro/
 │   ├── server_fastmcp.py    # FastMCP + HTTP server (MCP tools, REST API, dashboard)
 │   ├── env_config.py        # Settings from .env (auto-reload)
 │   ├── b3_history.py        # Official B3 history (COTAHIST) -> MySQL
+│   ├── b3_proventos.py      # B3 dividends / JCP / stock events -> MySQL
 │   ├── data_providers.py    # Yahoo Finance + brapi.dev
 │   ├── multi_timeframe.py   # MTF analysis
 │   ├── advanced_filters.py  # Liquidity, regime, timing
@@ -211,7 +215,7 @@ nexus-trade-pro/
 │   ├── atualizar_cotacoes.sh / .bat   # Daily B3 history update
 │   └── *.bat                # Windows shortcuts (auto trader, training)
 ├── sql/
-│   └── bolsa_schema.sql     # MySQL tables for the B3 history
+│   └── bolsa_schema.sql     # MySQL tables and view for the B3 history and dividends
 ├── docs/
 │   ├── HISTORICO_B3.md      # B3 history importer guide (reusable in other projects)
 │   ├── GUIA_INICIO_RAPIDO.md# Forward test -> real trading guide
@@ -235,6 +239,7 @@ graph TD
     H2 --> DB[(MySQL - B3 history)]
     H2 --> E
     U[b3_history.py / atualizar_cotacoes] -->|COTAHIST files| DB
+    V[b3_proventos.py] -->|B3 listed companies API| DB
     B --> F[Technical Analysis]
     F --> G[Multi-Timeframe]
     F --> H[Indicators]

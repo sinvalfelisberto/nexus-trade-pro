@@ -1,6 +1,7 @@
 # Histórico oficial da B3 no MySQL
 
-Importador das **Séries Históricas da B3 (arquivos COTAHIST)** para um banco MySQL.
+Importadores de dados oficiais da B3 para um banco MySQL: **cotações diárias** (Séries Históricas,
+arquivos COTAHIST) e **proventos** (dividendos, JCP, rendimentos de FII e eventos em ações).
 É o que alimenta os gráficos do Nexus Trade Pro, e pode ser reutilizado em outros projetos.
 
 - Fonte oficial e gratuita: `https://bvmf.bmfbovespa.com.br/InstDados/SerHist/`
@@ -11,9 +12,10 @@ Arquivos:
 
 | Arquivo | Para quê |
 |---|---|
-| `core/b3_history.py` | Importador (CLI) e funções de consulta |
-| `sql/bolsa_schema.sql` | DDL das tabelas (gerado por `python3 core/b3_history.py --sql`) |
-| `scripts/atualizar_cotacoes.sh` / `.bat` | Atualização diária (Linux / Windows), com log em `logs/` |
+| `core/b3_history.py` | Cotações: importador (CLI) e funções de consulta |
+| `core/b3_proventos.py` | Proventos: importador (CLI) |
+| `sql/bolsa_schema.sql` | DDL das tabelas e da view (gerado pelos `--sql` dos dois importadores) |
+| `scripts/atualizar_cotacoes.sh` / `.bat` | Atualização diária de cotações e proventos (Linux / Windows), com log em `logs/` |
 
 ## Tabelas
 
@@ -33,7 +35,21 @@ demais do banco):
 | `quantidade` | Quantidade de títulos negociados |
 | `volume` | Volume financeiro em R$ |
 
-**`bolsa_arquivos_importados`** — controle dos arquivos já importados (evita reimportar).
+**`bolsa_arquivos_importados`** — controle dos arquivos já importados (evita reimportar) e dos
+dias sem pregão (`tipo = 'D'`, `registros = 0`).
+
+**`bolsa_ativos`** — cadastro `ticker` × `isin` × `emissor` (ex.: PETR4 × BRPETRACNPR6 × PETR),
+com o primeiro e o último pregão vistos. Extraído dos mesmos arquivos COTAHIST e atualizado a cada
+importação. É o que liga os proventos (que a B3 informa por ISIN) aos tickers.
+
+**`bolsa_proventos`** — dividendos, JCP e rendimentos (valor bruto por ação/cota), com data de
+aprovação, data-com, data de pagamento e período de referência. Ver [Proventos](#proventos).
+
+**`bolsa_eventos_acoes`** — desdobramentos, grupamentos e bonificações, com o fator informado pela B3.
+
+**`bolsa_proventos_emissores`** — quando cada emissor foi consultado e se houve erro.
+
+**`bolsa_vw_proventos`** (view) — `bolsa_proventos` com a coluna `ticker` (via `bolsa_ativos`).
 
 ## Configuração (`.env`)
 
@@ -60,6 +76,7 @@ python3 core/b3_history.py --carga       # carga inicial (últimos B3_HISTORY_YE
 python3 core/b3_history.py --atualizar   # procura e importa os pregões que faltam
 python3 core/b3_history.py --verificar   # só lista o que falta, sem importar
 python3 core/b3_history.py --status      # linhas, ativos, período e tamanho no banco
+python3 core/b3_history.py --ativos      # reconstrói o cadastro ticker x ISIN (bolsa_ativos)
 python3 core/b3_history.py --sql         # imprime o DDL (não conecta no banco)
 ```
 
@@ -89,16 +106,73 @@ python3 core/b3_history.py --sql         # imprime o DDL (não conecta no banco)
 - **No Nexus Trade Pro**, o servidor (`python3 core/server_fastmcp.py http`) roda a atualização
   sozinho ao subir e a cada `B3_UPDATE_HOURS` horas. A vela do pregão em andamento vem da brapi.
 
+## Proventos
+
+Fonte: API pública de empresas listadas da B3, a mesma do site B3 > Empresas listadas
+(`sistemaswebb3-listados.b3.com.br`), sem token.
+
+```bash
+python3 core/b3_proventos.py --atualizar                   # todos os emissores (ações, FIIs, BDRs) da base
+python3 core/b3_proventos.py --atualizar --emissores PETR,VALE,HGLG
+python3 core/b3_proventos.py --atualizar --dias 1          # só os consultados há mais de 1 dia
+python3 core/b3_proventos.py --status
+python3 core/b3_proventos.py --sql
+```
+
+- **Pré-requisito:** `bolsa_ativos` preenchida. Numa base carregada antes da existência dessa tabela,
+  rode uma vez `python3 core/b3_history.py --ativos` (~1 min, só lê os arquivos anuais).
+- **Emissores consultados:** os de ações (`02`), FIIs (`12`) e BDRs (`34`) negociados no último ano,
+  cerca de 1.570 (pausa de 0,2 s entre consultas, para não sobrecarregar a B3).
+- **Janela de ~12 meses:** a B3 devolve basicamente os proventos em dinheiro dos últimos ~12 meses
+  (na primeira carga, 99% dos registros; só 84 de 62 emissores eram mais antigos). Por isso
+  `bolsa_proventos` é **acumulativa**: o que sai da janela continua na base. Dentro da janela, a base
+  acompanha a B3 (proventos que ela deixa de listar, como cancelamentos, são removidos). Para montar
+  histórico, mantenha a atualização rodando; proventos anteriores à primeira carga não estão
+  disponíveis nessa API. Os eventos em ações vêm com o histórico completo.
+- **Tipos (`tipo`):** `DIVIDENDO`, `JRS CAP PROPRIO` (JCP), `RENDIMENTO` (FIIs), e também
+  `AMORTIZACAO RF` e `REST CAP DIN` (amortização e restituição de capital: devolução do capital
+  investido, não rendimento; exclua-os ao calcular dividend yield).
+- **Primeira carga (referência):** 1.569 emissores em ~12 min, 7.476 proventos de 1.133 emissores
+  (1.220 tickers), 1.300 eventos em ações, ~3 MB.
+- **Sem ticker na view:** recibos e direitos de subscrição (ex.: ISINs `BRHGLGR...` do HGLG11) não
+  entram nas cotações importadas; seus proventos aparecem com `ticker = NULL`.
+- **Atualização diária:** `scripts/atualizar_cotacoes.sh` e o servidor já atualizam os proventos
+  (cada emissor no máximo uma vez por dia).
+
+```sql
+-- Proventos da PETR4 nos últimos 12 meses
+SELECT tipo, valor, data_com, data_pagamento, referente
+FROM bolsa_vw_proventos WHERE ticker = 'PETR4' ORDER BY data_com DESC;
+
+-- Próximos pagamentos
+SELECT ticker, tipo, valor, data_pagamento FROM bolsa_vw_proventos
+WHERE data_pagamento >= CURDATE() ORDER BY data_pagamento, ticker;
+
+-- Dividend yield dos últimos 12 meses (soma dos proventos / último fechamento).
+-- Valores extremos (centenas de %) costumam ser fundos em liquidação ou papéis com grupamento
+-- no período (preços nominais) - confira bolsa_eventos_acoes antes de tirar conclusões.
+SELECT p.ticker, ROUND(SUM(p.valor), 4) AS proventos_12m, c.fechamento,
+       ROUND(100 * SUM(p.valor) / c.fechamento, 2) AS dy_pct
+FROM bolsa_vw_proventos p
+JOIN bolsa_cotacoes_diarias c ON c.ticker = p.ticker
+     AND c.data = (SELECT MAX(data) FROM bolsa_cotacoes_diarias)
+WHERE p.data_com >= CURDATE() - INTERVAL 12 MONTH
+  AND p.tipo IN ('DIVIDENDO', 'JRS CAP PROPRIO', 'RENDIMENTO')   -- sem amortizacao/restituicao
+GROUP BY p.ticker, c.fechamento ORDER BY dy_pct DESC LIMIT 20;
+```
+
 ## Reutilizando em outro projeto
 
-O `b3_history.py` funciona sozinho, fora do Nexus Trade Pro:
+O `b3_history.py` e o `b3_proventos.py` funcionam sozinhos, fora do Nexus Trade Pro
+(o de proventos precisa do `b3_history.py` na mesma pasta):
 
 ```bash
 pip install httpx pymysql python-dotenv
-cp core/b3_history.py /caminho/do/outro/projeto/
+cp core/b3_history.py core/b3_proventos.py /caminho/do/outro/projeto/
 cd /caminho/do/outro/projeto
 # crie um .env com as variáveis DB_OLD_* (e, se quiser, as B3_*) no diretório atual
 python3 b3_history.py --carga
+python3 b3_proventos.py --atualizar
 ```
 
 Sem o `env_config.py` do Nexus Trade Pro ao lado, ele lê o `.env` do diretório atual
@@ -112,7 +186,8 @@ candles = b3_history.get_daily("PETR4", since=date(2025, 1, 1))  # velas diária
 mensal = b3_history.aggregate(candles, "1mo")                     # 1wk, 1mo ou 1y
 ```
 
-Para trocar o prefixo das tabelas, altere `TABLE_QUOTES` e `TABLE_FILES` no início do arquivo.
+Para trocar o prefixo das tabelas, altere as constantes `TABLE_*` no início de cada arquivo
+(e `VIEW_CASH` no de proventos).
 
 ## Consultas úteis
 
@@ -160,3 +235,4 @@ Registro tipo `01` (cotação), posições 1-based do layout oficial da B3:
 | PREABE, PREMAX, PREMIN, PREMED, PREULT | 57–121 | preços (2 casas decimais implícitas) |
 | TOTNEG / QUATOT / VOLTOT | 148–152 / 153–170 / 171–188 | negócios, quantidade, volume |
 | FATCOT | 211–217 | fator de cotação (preço por lote de N títulos) |
+| CODISI | 231–242 | código ISIN (usado em `bolsa_ativos`) |

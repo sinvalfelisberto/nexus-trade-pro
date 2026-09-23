@@ -168,6 +168,7 @@ Acesse <http://localhost:8000/dashboard> (o proprio servidor entrega a pagina).
 |-----|--------|--------|
 | brapi.dev | Cotacoes atuais | 15.000 req/mes, 1 ativo e 1 requisicao por vez, historico de 3 meses, ~30 min de atraso |
 | B3 - Series Historicas (COTAHIST) | Historico diario oficial dos graficos (MySQL) | Sem limite, sem token - ver [HISTORICO_B3.md](HISTORICO_B3.md) |
+| B3 - Empresas listadas | Proventos (dividendos, JCP, rendimentos, eventos em acoes) no MySQL | Sem token; so os ultimos ~12 meses de proventos em dinheiro |
 | Yahoo Finance | Provedor alternativo dos modulos de analise | Nao oficial, sem token |
 | Tavily AI | Noticias e sentimento | 1.000 req/mes |
 
@@ -391,6 +392,9 @@ else:
   - `core/b3_history.py` (carga, atualizacao, verificacao) - reutilizavel em outros projetos
   - `scripts/atualizar_cotacoes.sh/.bat`: procura e preenche pregoes faltando ou incompletos, registra feriados
   - Servidor atualiza sozinho ao subir e a cada `B3_UPDATE_HOURS` horas
+- **Proventos da B3** (`core/b3_proventos.py`): dividendos, JCP, rendimentos de FII e eventos em acoes
+  (desdobramento, grupamento, bonificacao) de ~1.570 emissores, ligados aos tickers pelo ISIN
+  (`bolsa_ativos`); tabela acumulativa, pois a API da B3 so mostra ~12 meses
 - **Graficos**: candles corrigidos (Chart.js 4 + plugin financeiro 0.2), velas diarias/semanais/mensais/anuais,
   painel de valores e tooltips em R$, selecao do ativo por lista com favoritos primeiro, fonte dos dados exibida
 - **Aba MERCADO**: favoritos (estrela), campo de busca por ticker/setor, busca de ativos fora da lista,

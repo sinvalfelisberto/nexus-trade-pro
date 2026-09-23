@@ -6,12 +6,14 @@ configurado no .env (DB_OLD_*), em tabelas com prefixo "bolsa_":
 
     bolsa_cotacoes_diarias     uma linha por ativo por pregao
     bolsa_arquivos_importados  controle dos arquivos ja importados
+    bolsa_ativos               cadastro ticker x ISIN x emissor (usado pelos proventos)
 
 Uso (na raiz do projeto):
     python3 core/b3_history.py --carga        # carga inicial (B3_HISTORY_YEARS anos)
     python3 core/b3_history.py --atualizar    # procura e importa os pregoes que faltam
     python3 core/b3_history.py --verificar    # so lista o que falta, sem importar
     python3 core/b3_history.py --status       # resumo do que esta no banco
+    python3 core/b3_history.py --ativos       # reconstroi o cadastro ticker x ISIN (bolsa_ativos)
     python3 core/b3_history.py --sql          # imprime o DDL das tabelas
 
 Guia completo (inclusive para reutilizar em outros projetos): docs/HISTORICO_B3.md
@@ -47,6 +49,7 @@ except ImportError:
 B3_URL = "https://bvmf.bmfbovespa.com.br/InstDados/SerHist/{}"
 TABLE_QUOTES = "bolsa_cotacoes_diarias"
 TABLE_FILES = "bolsa_arquivos_importados"
+TABLE_ASSETS = "bolsa_ativos"
 BATCH_SIZE = 5000
 
 
@@ -116,6 +119,21 @@ CREATE TABLE IF NOT EXISTS {TABLE_FILES} (
     PRIMARY KEY (arquivo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   COMMENT='Controle de importacao dos arquivos COTAHIST da B3'
+""", f"""
+CREATE TABLE IF NOT EXISTS {TABLE_ASSETS} (
+    ticker          VARCHAR(12)     NOT NULL COMMENT 'Codigo de negociacao',
+    isin            CHAR(12)        NOT NULL COMMENT 'Codigo ISIN do papel (CODISI) - liga aos proventos',
+    emissor         VARCHAR(8)      NOT NULL COMMENT 'Codigo do emissor na B3 (4 primeiras letras, ex.: PETR)',
+    codbdi          CHAR(2)         NOT NULL,
+    nome            VARCHAR(12)     NULL,
+    especificacao   VARCHAR(10)     NULL,
+    primeiro_pregao DATE            NOT NULL COMMENT 'Primeiro pregao visto nos arquivos importados',
+    ultimo_pregao   DATE            NOT NULL COMMENT 'Ultimo pregao visto nos arquivos importados',
+    PRIMARY KEY (ticker),
+    KEY idx_isin (isin),
+    KEY idx_emissor (emissor)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='Cadastro dos ativos (ticker x ISIN x emissor) extraido dos arquivos COTAHIST'
 """]
 
 
@@ -162,7 +180,40 @@ def parse_lines(zip_path: str, since: date = None):
                     line[27:39].strip(), " ".join(line[39:49].split()),
                     price(56, 69), price(69, 82), price(82, 95), price(95, 108), price(108, 121),
                     int(line[147:152]), int(line[152:170]), int(line[170:188]) / 100,
+                    line[230:242].strip(),  # ISIN (CODISI) - nao vai para a tabela de cotacoes
                 )
+
+
+ASSETS_SQL = f"""
+    INSERT INTO {TABLE_ASSETS} (ticker, isin, emissor, codbdi, nome, especificacao, primeiro_pregao, ultimo_pregao)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    ON DUPLICATE KEY UPDATE
+        isin          = IF(VALUES(ultimo_pregao) >= ultimo_pregao, VALUES(isin), isin),
+        codbdi        = IF(VALUES(ultimo_pregao) >= ultimo_pregao, VALUES(codbdi), codbdi),
+        nome          = IF(VALUES(ultimo_pregao) >= ultimo_pregao, VALUES(nome), nome),
+        especificacao = IF(VALUES(ultimo_pregao) >= ultimo_pregao, VALUES(especificacao), especificacao),
+        primeiro_pregao = LEAST(primeiro_pregao, VALUES(primeiro_pregao)),
+        ultimo_pregao   = GREATEST(ultimo_pregao, VALUES(ultimo_pregao))
+"""
+
+
+def collect_asset(assets: dict, row):
+    """Acumula o cadastro do ativo (ticker -> ISIN, emissor, periodo) a partir de uma linha do COTAHIST"""
+    ticker, d, codbdi, nome, espec, isin = row[0], row[1], row[2], row[3], row[4], row[13]
+    a = assets.get(ticker)
+    if a is None:
+        assets[ticker] = [ticker, isin, ticker[:4], codbdi, nome, espec, d, d]
+    else:
+        if d >= a[7]:
+            a[1], a[3], a[4], a[5] = isin, codbdi, nome, espec
+        a[6], a[7] = min(a[6], d), max(a[7], d)
+
+
+def save_assets(conn, assets: dict):
+    if assets:
+        with conn.cursor() as c:
+            c.executemany(ASSETS_SQL, [tuple(a) for a in assets.values()])
+        conn.commit()
 
 
 INSERT_SQL = f"""
@@ -192,10 +243,11 @@ def import_file(conn, filename: str, since: date = None, force: bool = False) ->
     if path is None:
         return -1
     try:
-        total, last, batch = 0, None, []
+        total, last, batch, assets = 0, None, [], {}
         with conn.cursor() as c:
             for row in parse_lines(path, since):
-                batch.append(row)
+                collect_asset(assets, row)
+                batch.append(row[:13])
                 last = max(last, row[1]) if last else row[1]
                 if len(batch) >= BATCH_SIZE:
                     c.executemany(INSERT_SQL, batch)
@@ -214,6 +266,7 @@ def import_file(conn, filename: str, since: date = None, force: bool = False) ->
                 (filename, filename[9], total, last),
             )
         conn.commit()
+        save_assets(conn, assets)
         print(f"\r[B3] {filename}: {total:,} linhas em {time.time() - t0:.0f}s")
         return total
     finally:
@@ -223,6 +276,27 @@ def import_file(conn, filename: str, since: date = None, force: bool = False) ->
 # ══════════════════════════════════════════════════════════════
 # CARGA E ATUALIZACAO
 # ══════════════════════════════════════════════════════════════
+def rebuild_assets(conn):
+    """Preenche bolsa_ativos a partir dos arquivos anuais do periodo (sem regravar cotacoes).
+    Necessario uma vez para bases carregadas antes da existencia da tabela."""
+    create_tables(conn)
+    start = cutoff_date()
+    for year in range(start.year, date.today().year + 1):
+        filename = f"COTAHIST_A{year}.ZIP"
+        t0 = time.time()
+        path = download(filename)
+        if path is None:
+            continue
+        try:
+            assets = {}
+            for row in parse_lines(path, start):
+                collect_asset(assets, row)
+            save_assets(conn, assets)
+            print(f"[B3] {filename}: {len(assets):,} ativos em {time.time() - t0:.0f}s")
+        finally:
+            os.unlink(path)
+
+
 def last_date(conn):
     with conn.cursor() as c:
         c.execute(f"SELECT MAX(data) FROM {TABLE_QUOTES}")
@@ -422,6 +496,7 @@ if __name__ == "__main__":
     group.add_argument("--atualizar", action="store_true", help="procura e importa os pregoes que faltam ou estao incompletos")
     group.add_argument("--verificar", action="store_true", help="so lista os pregoes que faltam, sem importar")
     group.add_argument("--status", action="store_true", help="mostra o resumo do banco")
+    group.add_argument("--ativos", action="store_true", help="reconstroi o cadastro ticker x ISIN (bolsa_ativos)")
     group.add_argument("--sql", action="store_true", help="imprime o DDL das tabelas (nao conecta no banco)")
     args = parser.parse_args()
 
@@ -441,6 +516,8 @@ if __name__ == "__main__":
             update(conn)
         elif args.verificar:
             update(conn, dry_run=True)
+        elif args.ativos:
+            rebuild_assets(conn)
         print("[B3] Status:", status(conn))
     finally:
         conn.close()

@@ -92,6 +92,7 @@
 - Sincronizacao com o auto trader (campos com nomes errados quebravam portfolio e historico)
 - Configuracao centralizada no `.env` (`core/env_config.py`), com prioridade sobre variaveis do sistema
 - Historico oficial da B3 no MySQL + script de atualizacao diaria que preenche lacunas
+- Proventos da B3 (dividendos, JCP, rendimentos, eventos em acoes) no MySQL, atualizados diariamente
 
 ---
 
